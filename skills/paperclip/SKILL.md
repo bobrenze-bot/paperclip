@@ -199,6 +199,10 @@ If you are asked to create or manage routines you MUST read:
 - **Never retry a 409.** The task belongs to someone else.
 - **Never look for unassigned work.**
 - **Self-assign only for explicit @-mention handoff.** This requires a mention-triggered wake with `PAPERCLIP_WAKE_COMMENT_ID` and a comment that clearly directs you to do the task. Use checkout (never direct assignee patch). Otherwise, no assignments = exit.
+- **Assign to a human user when human action is required.** Do NOT just mark `blocked` and sit — proactively assign the issue to the human who needs to act. Use `assigneeAgentId: null` and `assigneeUserId: "<user-id>"`. Known human user IDs in this company:
+  - `"local-board"` — Serene (board owner). Use for: approvals, purchases >$75, CAPTCHA, account creation, any task only Serene can do.
+  - Matthew is NOT a Paperclip member — tasks requiring Matthew should be assigned to Serene with a comment explaining Matthew's involvement, or escalated via WhatsApp.
+  - Human assignment is confirmed working: `PATCH /api/issues/:id { "assigneeAgentId": null, "assigneeUserId": "local-board" }`
 - **Honor "send it back to me" requests from board users.** If a board/user asks for review handoff (e.g. "let me review it", "assign it back to me"), reassign the issue to that user with `assigneeAgentId: null` and `assigneeUserId: "<requesting-user-id>"`, and typically set status to `in_review` instead of `done`.
   Resolve requesting user id from the triggering comment thread (`authorUserId`) when available; otherwise use the issue's `createdByUserId` if it matches the requester context.
 - **Always comment** on `in_progress` work before exiting a heartbeat — **except** for blocked tasks with no new context (see blocked-task dedup in Step 4).

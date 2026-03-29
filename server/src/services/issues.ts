@@ -1878,6 +1878,30 @@ export function issueService(db: Db) {
         }
       }
 
+      // Auto-adopt: checkoutRunId is null but agent is assigned + in_progress.
+      // sameRunLock returns false when actorRunId is set but checkoutRunId is null.
+      if (
+        actorRunId &&
+        current.status === "in_progress" &&
+        current.assigneeAgentId === actorAgentId &&
+        current.checkoutRunId == null
+      ) {
+        const rows = await db
+          .update(issues)
+          .set({ checkoutRunId: actorRunId, executionRunId: actorRunId, updatedAt: new Date() })
+          .where(
+            and(
+              eq(issues.id, id),
+              eq(issues.status, "in_progress"),
+              eq(issues.assigneeAgentId, actorAgentId),
+              isNull(issues.checkoutRunId),
+            ),
+          )
+          .returning();
+        const nullAdopted = rows[0] ?? null;
+        if (nullAdopted) return { ...nullAdopted, adoptedFromRunId: null as string | null };
+      }
+
       throw conflict("Issue run ownership conflict", {
         issueId: current.id,
         status: current.status,
