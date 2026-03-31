@@ -40,6 +40,7 @@ vi.mock("../services/index.js", () => ({
   agentService: () => mockAgentService,
   companySkillService: () => mockCompanySkillService,
   logActivity: mockLogActivity,
+  scheduleCronToolService: () => ({}),
 }));
 
 function createApp(actor: Record<string, unknown>) {

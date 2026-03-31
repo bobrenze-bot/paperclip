@@ -59,6 +59,15 @@ const mockAdapter = vi.hoisted(() => ({
   syncSkills: vi.fn(),
 }));
 
+const mockScheduleCronToolService = vi.hoisted(() => ({
+  execute: vi.fn(),
+  schedule: vi.fn(),
+  list: vi.fn(),
+  cancel: vi.fn(),
+  setEnabled: vi.fn(),
+  get: vi.fn(),
+}));
+
 vi.mock("@paperclipai/shared/telemetry", () => ({
   trackAgentCreated: mockTrackAgentCreated,
   trackErrorHandlerCrash: vi.fn(),
@@ -82,6 +91,7 @@ vi.mock("../services/index.js", () => ({
   secretService: () => mockSecretService,
   syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
   workspaceOperationService: () => mockWorkspaceOperationService,
+  scheduleCronToolService: () => mockScheduleCronToolService,
 }));
 
 vi.mock("../adapters/index.js", () => ({

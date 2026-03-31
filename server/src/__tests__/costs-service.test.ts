@@ -81,6 +81,7 @@ vi.mock("../services/index.js", () => ({
   agentService: () => mockAgentService,
   heartbeatService: () => mockHeartbeatService,
   logActivity: mockLogActivity,
+  scheduleCronToolService: () => ({}),
 }));
 
 vi.mock("../services/quota-windows.js", () => ({

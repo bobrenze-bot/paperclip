@@ -47,6 +47,7 @@ vi.mock("../services/index.js", () => ({
   secretService: () => mockSecretService,
   syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
   workspaceOperationService: () => ({}),
+  scheduleCronToolService: () => ({}),
 }));
 
 vi.mock("../adapters/index.js", () => ({

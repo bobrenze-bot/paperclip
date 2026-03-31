@@ -43,6 +43,7 @@ vi.mock("../services/index.js", () => ({
   deduplicateAgentName: vi.fn(),
   logActivity: mockLogActivity,
   notifyHireApproved: vi.fn(),
+  scheduleCronToolService: () => ({}),
 }));
 
 function createDbStub() {

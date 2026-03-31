@@ -49,6 +49,7 @@ vi.mock("../services/index.js", () => ({
   companyService: () => mockCompanyService,
   feedbackService: () => mockFeedbackService,
   logActivity: mockLogActivity,
+  scheduleCronToolService: () => ({}),
 }));
 
 function createCompany() {

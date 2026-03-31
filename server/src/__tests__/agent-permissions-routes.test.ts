@@ -101,6 +101,7 @@ vi.mock("../services/index.js", () => ({
   secretService: () => mockSecretService,
   syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
   workspaceOperationService: () => mockWorkspaceOperationService,
+  scheduleCronToolService: () => ({}),
 }));
 
 function createDbStub() {

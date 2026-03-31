@@ -103,6 +103,7 @@ vi.mock("../services/index.js", () => ({
   accessService: () => mockAccessService,
   logActivity: mockLogActivity,
   routineService: () => mockRoutineService,
+  scheduleCronToolService: () => ({}),
 }));
 
 function createApp(actor: Record<string, unknown>) {

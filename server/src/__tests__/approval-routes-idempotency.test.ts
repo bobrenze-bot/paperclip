@@ -37,6 +37,7 @@ vi.mock("../services/index.js", () => ({
   issueApprovalService: () => mockIssueApprovalService,
   logActivity: mockLogActivity,
   secretService: () => mockSecretService,
+  scheduleCronToolService: () => ({}),
 }));
 
 function createApp() {

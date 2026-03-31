@@ -43,6 +43,7 @@ import {
   secretService,
   syncInstructionsBundleConfigFromFilePath,
   workspaceOperationService,
+  scheduleCronToolService,
 } from "../services/index.js";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, assertInstanceAdmin, getActorInfo } from "./authz.js";
@@ -2451,6 +2452,50 @@ export function agentRoutes(db: Db) {
       agentName: agent.name,
       adapterType: agent.adapterType,
     });
+  });
+
+  // ScheduleCronTool — Agent-facing cron scheduling
+  const cronTool = scheduleCronToolService(db);
+
+  router.post("/agents/:id/schedule-cron", async (req, res) => {
+    const agentId = req.params.id as string;
+    const agent = await svc.getById(agentId);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    
+    // Allow agents to manage their own schedules, or board to manage any
+    if (req.actor.type === "agent" && req.actor.agentId !== agentId) {
+      throw forbidden("Agents can only manage their own cron schedules");
+    }
+    if (req.actor.type === "board") {
+      assertCompanyAccess(req, agent.companyId);
+    }
+
+    const { operation, ...params } = req.body as { operation: string } & Record<string, unknown>;
+    
+    if (!operation) {
+      res.status(400).json({ error: "Missing required field: operation" });
+      return;
+    }
+
+    const result = await cronTool.execute(agentId, agent.companyId, operation, params);
+    
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId,
+      runId: actor.runId,
+      action: "agent.schedule_cron",
+      entityType: "agent",
+      entityId: agentId,
+      details: { operation, params, success: result.success },
+    });
+
+    res.json(result);
   });
 
   return router;
