@@ -67,6 +67,14 @@ import {
 } from "../services/issue-execution-policy.js";
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
+
+/**
+ * Sanitize string for JSONB storage by removing 4-byte UTF-8 characters (emojis)
+ * which cause Postgres to reject inserts into JSONB columns.
+ */
+function sanitizeForJson(str: string): string {
+  return str.replace(/[\u{10000}-\u{10FFFF}]/gu, "");
+}
 const updateIssueRouteSchema = updateIssueSchema.extend({
   interrupt: z.boolean().optional(),
 });
@@ -1746,7 +1754,7 @@ export function issueRoutes(
         entityId: issue.id,
         details: {
           commentId: comment.id,
-          bodySnippet: comment.body.slice(0, 120),
+          bodySnippet: sanitizeForJson(Array.from(comment.body).slice(0, 120).join("")),
           identifier: issue.identifier,
           issueTitle: issue.title,
           ...(reopened ? { reopened: true, reopenedFrom: reopenFromStatus, source: "comment" } : {}),

@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5173,
+    allowedHosts: ["serenze-server.tail7779e8.ts.net"],
     watch: createUiDevWatchOptions(process.cwd()),
     proxy: {
       "/api": {
