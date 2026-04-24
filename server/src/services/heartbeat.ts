@@ -1957,6 +1957,10 @@ export function heartbeatService(db: Db) {
   const budgets = budgetService(db, budgetHooks);
   let unsafeTextProjectionPromise: Promise<boolean> | null = null;
 
+  // Budget refill alert rate limiter: Map<companyId, timestamp>
+  const budgetAlertCooldowns = new Map<string, number>();
+  const BUDGET_ALERT_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+
   async function hasUnsafeTextProjectionDatabase() {
     if (!unsafeTextProjectionPromise) {
       unsafeTextProjectionPromise = db
@@ -4338,11 +4342,12 @@ export function heartbeatService(db: Db) {
     comment: string;
   }) {
     const updated = await issuesSvc.update(input.issue.id, {
-      status: "blocked",
+      status: "todo",
+      executionLockedAt: null,
+      executionRunId: null,
+      executionAgentNameKey: null,
     });
     if (!updated) return null;
-
-    await issuesSvc.addComment(input.issue.id, input.comment, {});
 
     await logActivity(db, {
       companyId: input.issue.companyId,
@@ -4355,7 +4360,7 @@ export function heartbeatService(db: Db) {
       entityId: input.issue.id,
       details: {
         identifier: input.issue.identifier,
-        status: "blocked",
+        status: "todo",
         previousStatus: input.previousStatus,
         source: "heartbeat.reconcile_stranded_assigned_issue",
         latestRunId: input.latestRun?.id ?? null,
@@ -6509,24 +6514,17 @@ export function heartbeatService(db: Db) {
         !recoveryAgent ||
         didAutomaticRecoveryFail(run, issue.status === "todo" ? "assignment_recovery" : "issue_continuation_needed");
       if (shouldBlockImmediately) {
-        const comment = buildImmediateExecutionPathRecoveryComment({
-          status: issue.status as "todo" | "in_progress",
-          latestRun: run,
-        });
         await tx
           .update(issues)
           .set({
-            status: "blocked",
+            status: "todo",
+            executionLockedAt: null,
+            executionRunId: null,
+            executionAgentNameKey: null,
             updatedAt: new Date(),
           })
           .where(eq(issues.id, issue.id));
-        return {
-          kind: "blocked" as const,
-          issueId: issue.id,
-          issueIdentifier: issue.identifier,
-          previousStatus: issue.status,
-          comment,
-        };
+        return { kind: "released" as const };
       }
 
       const retryReason = issue.status === "todo" ? "assignment_recovery" : "issue_continuation_needed";
@@ -6601,30 +6599,6 @@ export function heartbeatService(db: Db) {
         run: queuedRun,
       };
     });
-
-    if (promotionResult?.kind === "blocked") {
-      await issuesSvc.addComment(promotionResult.issueId, promotionResult.comment, {});
-      await logActivity(db, {
-        companyId: run.companyId,
-        actorType: "system",
-        actorId: "system",
-        agentId: null,
-        runId: run.id,
-        action: "issue.updated",
-        entityType: "issue",
-        entityId: promotionResult.issueId,
-        details: {
-          identifier: promotionResult.issueIdentifier,
-          status: "blocked",
-          previousStatus: promotionResult.previousStatus,
-          source: "heartbeat.release_issue_execution_and_promote",
-          latestRunId: run.id,
-          latestRunStatus: run.status,
-          latestRunErrorCode: run.errorCode ?? null,
-        },
-      });
-      return;
-    }
 
     const promotedRun = promotionResult?.run ?? null;
     if (!promotedRun) return;
@@ -7728,33 +7702,101 @@ export function heartbeatService(db: Db) {
       let enqueued = 0;
       let skipped = 0;
 
+      // Phase 1: Check if all agents are budget-paused
+      let allAgentsPausedWithBudget = true;
+      let hasNonBudgetPaused = false;
+      let hasActiveAgent = false;
+      const totalCompanies = new Set<string>();
+
       for (const agent of allAgents) {
-        if (agent.status === "paused" || agent.status === "terminated" || agent.status === "pending_approval") continue;
-        const policy = parseHeartbeatPolicy(agent);
-        if (!policy.enabled || policy.intervalSec <= 0) continue;
-
-        checked += 1;
-        const baseline = new Date(agent.lastHeartbeatAt ?? agent.createdAt).getTime();
-        const elapsedMs = now.getTime() - baseline;
-        if (elapsedMs < policy.intervalSec * 1000) continue;
-
-        const run = await enqueueWakeup(agent.id, {
-          source: "timer",
-          triggerDetail: "system",
-          reason: "heartbeat_timer",
-          requestedByActorType: "system",
-          requestedByActorId: "heartbeat_scheduler",
-          contextSnapshot: {
-            source: "scheduler",
-            reason: "interval_elapsed",
-            now: now.toISOString(),
-          },
-        });
-        if (run) enqueued += 1;
-        else skipped += 1;
+        totalCompanies.add(agent.companyId);
+        
+        if (agent.status === "paused" || agent.status === "terminated" || agent.status === "pending_approval") {
+          if (agent.status === "paused" && agent.pauseReason === "budget") {
+            allAgentsPausedWithBudget = allAgentsPausedWithBudget && true;
+          } else if (agent.status === "paused") {
+            hasNonBudgetPaused = true;
+            allAgentsPausedWithBudget = false;
+          } else {
+            allAgentsPausedWithBudget = false;
+          }
+        } else {
+          hasActiveAgent = true;
+          allAgentsPausedWithBudget = false;
+        }
       }
 
-      return { checked, enqueued, skipped };
+      // If not all agents are paused with budget reason, proceed with normal timer behavior
+      if (!allAgentsPausedWithBudget || hasActiveAgent || hasNonBudgetPaused) {
+        for (const agent of allAgents) {
+          if (agent.status === "paused" || agent.status === "terminated" || agent.status === "pending_approval") continue;
+          const policy = parseHeartbeatPolicy(agent);
+          if (!policy.enabled || policy.intervalSec <= 0) continue;
+
+          checked += 1;
+          const baseline = new Date(agent.lastHeartbeatAt ?? agent.createdAt).getTime();
+          const elapsedMs = now.getTime() - baseline;
+          if (elapsedMs < policy.intervalSec * 1000) continue;
+
+          const run = await enqueueWakeup(agent.id, {
+            source: "timer",
+            triggerDetail: "system",
+            reason: "heartbeat_timer",
+            requestedByActorType: "system",
+            requestedByActorId: "heartbeat_scheduler",
+            contextSnapshot: {
+              source: "scheduler",
+              reason: "interval_elapsed",
+              now: now.toISOString(),
+            },
+          });
+          if (run) enqueued += 1;
+          else skipped += 1;
+        }
+
+        return { checked, enqueued, skipped };
+      }
+
+      // Phase 2: All agents are budget-paused - check for actionable work and emit alerts
+      for (const companyId of totalCompanies) {
+        const { todo, inProgress, inReview } = await db
+          .select({
+            todo: sql<number>`count(*) filter (where ${issues.status} = 'todo')`,
+            inProgress: sql<number>`count(*) filter (where ${issues.status} = 'in_progress')`,
+            inReview: sql<number>`count(*) filter (where ${issues.status} = 'in_review')`,
+          })
+          .from(issues)
+          .where(eq(issues.companyId, companyId))
+          .then((rows) => rows[0]);
+
+        const actionable = (todo ?? 0) + (inProgress ?? 0) + (inReview ?? 0);
+        if (actionable === 0) continue;
+
+        // Check rate limit (15 min cooldown per company)
+        const nowMs = now.getTime();
+        const lastAlert = budgetAlertCooldowns.get(companyId) ?? 0;
+        if (nowMs - lastAlert < BUDGET_ALERT_COOLDOWN_MS) continue;
+
+        // Emit budget refill alert
+        const pausedAgentCount = allAgents.filter(a => a.companyId === companyId && a.status === "paused" && a.pauseReason === "budget").length;
+        
+        publishLiveEvent({
+          companyId,
+          type: "budget_refill_alert",
+          payload: {
+            actionable,
+            pausedAgentCount,
+            pauseReason: "budget",
+            lastAlertAt: new Date().toISOString(),
+          },
+        });
+
+        // Update cooldown
+        budgetAlertCooldowns.set(companyId, nowMs);
+      }
+
+      // Return timer tick result (no runs enqueued when all agents are paused)
+      return { checked: allAgents.length, enqueued: 0, skipped: 0 };
     },
 
     cancelRun: (runId: string) => cancelRunInternal(runId),
@@ -8285,7 +8327,7 @@ export async function heartbeatStuckDetectionScheduler(db: Db, now: Date = new D
     return { skipped: true };
   }
   
-  const result = await heartbeatRunsSvc.detectStuckRuns(false);
+  const result = await heartbeatRunsSvc.detectStuckRuns(true);
   
   return {
     ...result,
