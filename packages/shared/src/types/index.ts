@@ -220,6 +220,14 @@ export type {
   AssigneeStarvationSummary,
   AssigneeStarvationAgent,
   AssigneeStarvationTask,
+  TaskAgeReport,
+  TaskAgeReportSummary,
+  TaskAgeBucket,
+  TaskAgeByStatus,
+  TaskAgeByAgent,
+  RoutineCatchUpBreach,
+  RoutineCatchUpBreachSummary,
+  RoutineCatchUpBreachDetails,
 } from "./dashboard.js";
 export type { ActivityEvent } from "./activity.js";
 export type {

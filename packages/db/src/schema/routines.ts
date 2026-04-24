@@ -122,6 +122,7 @@ export const routineCatchUpBreaches = pgTable(
     triggerId: uuid("trigger_id").references(() => routineTriggers.id, { onDelete: "set null" }),
     missedCount: integer("missed_count").notNull(),
     capValue: integer("cap_value").notNull().default(25),
+    droppedCount: integer("dropped_count").notNull().default(0),
     detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
     acknowledgedByAgentId: uuid("acknowledged_by_agent_id").references(() => agents.id, { onDelete: "set null" }),

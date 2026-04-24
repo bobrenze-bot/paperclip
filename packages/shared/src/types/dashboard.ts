@@ -33,6 +33,13 @@ export interface DashboardSummary {
     pausedProjects: number;
   };
   runActivity: DashboardRunActivityDay[];
+  routineCatchUpBreaches?: {
+    totalBreaches: number;
+    totalMissedRuns: number;
+    maxMissedInSingleBreach: number;
+    acknowledgedCount: number;
+    hasUnacknowledgedBreaches: boolean;
+  };
 }
 
 export interface QueueHealthRefillRisk {
@@ -138,7 +145,16 @@ export interface StuckRunHistoricalData {
   warningCount: number;
   criticalCount: number;
   dismissedCount: number;
+  cancellationCount: number;
   avgScore: number;
+}
+
+export interface StuckRunEscalationMetrics {
+  totalAdminReviews: number;
+  totalAutoCancellations: number;
+  cancellationRate: number; // 0-1
+  cancellationRatePercent: number; // 0-100 with 2 decimal places
+  avgGracePeriodMinutes: number;
 }
 
 export interface StuckRunMetrics {
@@ -154,6 +170,7 @@ export interface StuckRunMetrics {
   accuracy: StuckRunAccuracyMetrics;
   timing: StuckRunTimeMetrics;
   costSavings: StuckRunCostSavings;
+  escalation: StuckRunEscalationMetrics;
   flaggedRuns: StuckRunFlaggedRun[];
   historicalData: StuckRunHistoricalData[];
   alerting: {
@@ -161,4 +178,106 @@ export interface StuckRunMetrics {
     anomalousPatterns: string[];
     recommendation: string | null;
   };
+}
+
+// Task Age Report Types for Queue Freshness Reviews
+export interface TaskAgeBucket {
+  bucket: string; // e.g., "0-1d", "1-3d", "3-7d", "7-14d", "14-30d", "30d+"
+  count: number;
+  percentage: number;
+  oldestTaskHours: number;
+  newestTaskHours: number;
+}
+
+export interface TaskAgeByStatus {
+  status: string;
+  count: number;
+  avgAgeHours: number;
+  oldestTaskHours: number;
+  newestTaskHours: number;
+  buckets: TaskAgeBucket[];
+}
+
+export interface TaskAgeByAgent {
+  agentId: string;
+  agentName: string | null;
+  totalTasks: number;
+  avgAgeHours: number;
+  oldestTaskHours: number;
+  newestTaskHours: number;
+  tasksByStatus: { status: string; count: number; avgAgeHours: number }[];
+}
+
+export interface TaskAgeReportSummary {
+  totalTasks: number;
+  avgAgeHours: number;
+  medianAgeHours: number;
+  oldestTaskHours: number;
+  newestTaskHours: number;
+  status: "fresh" | "warning" | "stale" | "critical";
+  freshnessScore: number; // 0-100, higher = fresher
+  alert: string | null;
+}
+
+export interface TaskAgeReport {
+  companyId: string;
+  generatedAt: string;
+  periodDays: number;
+  freshnessThresholds: {
+    healthyMaxAgeHours: number; // 7 days = 168 hours
+    warningMaxAgeHours: number; // 14 days = 336 hours
+    criticalMaxAgeHours: number; // 30 days = 720 hours
+  };
+  summary: TaskAgeReportSummary;
+  ageDistribution: TaskAgeBucket[];
+  byStatus: TaskAgeByStatus[];
+  byAgent: TaskAgeByAgent[];
+  oldestTasks: {
+    id: string;
+    identifier: string | null;
+    title: string;
+    status: string;
+    agentId: string | null;
+    agentName: string | null;
+    ageHours: number;
+    createdAt: string;
+    updatedAt: string;
+  }[];
+  recommendations: string[];
+}
+
+// Routine Catch-Up Breach Types forHardened Monitoring
+export interface RoutineCatchUpBreach {
+  id: string;
+  routineId: string;
+  triggerId: string | null;
+  missedCount: number;
+  capValue: number;
+  droppedCount: number;
+  detectedAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedByAgentId: string | null;
+  acknowledgedByUserId: string | null;
+}
+
+export interface RoutineCatchUpBreachSummary {
+  totalBreaches: number;
+  totalMissedRuns: number;
+  totalDroppedRuns: number;
+  maxMissedInSingleBreach: number;
+  maxDroppedInSingleBreach: number;
+  acknowledgedCount: number;
+  hasUnacknowledgedBreaches: boolean;
+}
+
+export interface RoutineCatchUpBreachDetails {
+  companyId: string;
+  periodDays: number;
+  generatedAt: string;
+  summary: RoutineCatchUpBreachSummary;
+  routineIds: string[];
+  triggerIds: string[];
+  dailyDistribution: { date: string; breachCount: number }[];
+  peakBreachDay: { date: string; breachCount: number } | null;
+  recentBreaches: RoutineCatchUpBreach[];
 }

@@ -52,5 +52,21 @@ export function dashboardRoutes(db: Db) {
     res.json(metrics);
   });
 
+  router.get("/companies/:companyId/dashboard/task-age", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const periodDays = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+    const report = await svc.taskAgeReport(companyId, periodDays);
+    res.json(report);
+  });
+
+  router.get("/companies/:companyId/dashboard/routine-catch-up-breaches", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const periodDays = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+    const breaches = await svc.routineCatchUpBreaches(companyId, periodDays);
+    res.json(breaches);
+  });
+
   return router;
 }

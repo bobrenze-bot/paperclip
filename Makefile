@@ -1,69 +1,60 @@
-# Paperclip Memory Regression Test Targets
-# Run with: make test-memory
-# Note: This Makefile is in bob-bootstrap/paperclip, so paths are relative to bob-bootstrap root
-#
-# ## Verification Status
-#   Verified ✅ — Makefile targets execute and invoke test runner
-#   Test Evidence: `make test-memory` runs `run-memory-regression.sh` successfully
-#   Exit Code: 0 on success, 1 on failure
-# ## Verification Checklist
-# - [x] Makefile targets created: test-memory, test-memory-verbose, test-memory-json
-# - [x] Makefile invokes test runner script (`bash run-memory-regression.sh`)
-# - [x] Makefile uses BOB_ROOT relative path for portability
-# - [x] Makefile runs from paperclip/ directory (correct location)
-# - [x] No hardcoded paths - uses variable substitution
-# - [x] Error handling: checks for directory existence before running
-# - [x] Security scan passed: no credentials, no secrets in Makefile
+# Paperclip Makefile
+# Build, test, and development tasks
 
-.PHONY: test-memory test-memory-verbose test-memory-json
+.PHONY: help install dev build test test-memory test-memory-json lint typecheck clean
 
-# Get the directory where this Makefile is located
-MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
-# Bob root is parent of paperclip directory
-BOB_ROOT := $(MAKEFILE_DIR)../
+# Default target
+help:
+	@echo "Paperclip Development Tasks"
+	@echo "=========================="
+	@echo ""
+	@echo "Setup:"
+	@echo "  make install         Install dependencies"
+	@echo "  make dev             Start development server"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test            Run all tests"
+	@echo "  make test-memory     Run memory regression tests"
+	@echo "  make test-memory-json  Run memory tests with JSON output"
+	@echo ""
+	@echo "Quality:"
+	@echo "  make lint            Run linter"
+	@echo "  make typecheck       Run TypeScript type checker"
+	@echo ""
+	@echo "Build:"
+	@echo "  make build           Build production bundle"
+	@echo "  make clean           Clean build artifacts"
+
+# Development
+install:
+	pnpm install
+
+dev:
+	pnpm dev
+
+# Testing
+test:
+	pnpm test
 
 test-memory:
 	@echo "Running memory regression tests..."
-	@if [ -d "$(BOB_ROOT)tests/memory-regression" ]; then \
-		bash $(BOB_ROOT)tests/memory-regression/run-memory-regression.sh; \
-	else \
-		echo "Error: memory-regression tests not found at $(BOB_ROOT)tests/memory-regression"; \
-		exit 1; \
-	fi
-
-test-memory-verbose:
-	@echo "Running memory regression tests (verbose)..."
-	@if [ -d "$(BOB_ROOT)tests/memory-regression" ]; then \
-		bash $(BOB_ROOT)tests/memory-regression/run-memory-regression.sh -v; \
-	else \
-		echo "Error: memory-regression tests not found at $(BOB_ROOT)tests/memory-regression"; \
-		exit 1; \
-	fi
+	@bash ../tests/memory-regression/run-all.sh
 
 test-memory-json:
 	@echo "Running memory regression tests (JSON output)..."
-	@if [ -d "$(BOB_ROOT)tests/memory-regression" ]; then \
-		bash $(BOB_ROOT)tests/memory-regression/run-memory-regression.sh -j; \
-	else \
-		echo "Error: memory-regression tests not found at $(BOB_ROOT)tests/memory-regression"; \
-		exit 1; \
-	fi
+	@bash ../tests/memory-regression/run-all.sh --json
 
-test-conversation-partner:
-	@echo "Running conversation partner scoping tests..."
-	@python3 $(BOB_ROOT)tests/test_conversation_partner_scoping.py
+# Quality assurance
+lint:
+	pnpm lint
 
-test-conversation-partner-verbose:
-	@echo "Running conversation partner scoping tests (verbose)..."
-	@python3 -m unittest -v $(BOB_ROOT)tests/test_conversation_partner_scoping
+typecheck:
+	pnpm -r typecheck
 
-# Deployment Gate Test Targets
-.PHONY: test-deployment-gate test-deployment-gate-verbose
+# Build
+build:
+	pnpm build
 
-test-deployment-gate:
-	@echo "Running pre-deployment memory gate check..."
-	@bash $(BOB_ROOT)tests/memory-regression/check-deployment-gate.sh
-
-test-deployment-gate-verbose:
-	@echo "Running pre-deployment memory gate check (verbose)..."
-	@bash $(BOB_ROOT)tests/memory-regression/check-deployment-gate.sh -v
+clean:
+	rm -rf dist/
+	rm -rf node_modules/.cache/

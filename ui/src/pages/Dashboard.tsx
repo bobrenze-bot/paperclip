@@ -20,7 +20,7 @@ import { ActivityRow } from "../components/ActivityRow";
 import { Identity } from "../components/Identity";
 import { timeAgo } from "../lib/timeAgo";
 import { cn, formatCents } from "../lib/utils";
-import { Bot, CircleDot, DollarSign, ShieldCheck, LayoutDashboard, PauseCircle } from "lucide-react";
+import { Bot, CircleDot, DollarSign, ShieldCheck, LayoutDashboard, PauseCircle, Clock3 } from "lucide-react";
 import { ActiveAgentsPanel } from "../components/ActiveAgentsPanel";
 import { ChartCard, RunActivityChart, PriorityChart, IssueStatusChart, SuccessRateChart } from "../components/ActivityCharts";
 import { PageSkeleton } from "../components/PageSkeleton";
@@ -236,6 +236,25 @@ export function Dashboard() {
               </Link>
             </div>
           ) : null}
+
+          {data.routineCatchUpBreaches?.hasUnacknowledgedBreaches && (
+            <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-500/20 bg-[linear-gradient(180deg,rgba(255,171,0,0.12),rgba(255,255,255,0.02))] px-4 py-3">
+              <div className="flex items-start gap-2.5">
+                <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                <div>
+                  <p className="text-sm font-medium text-amber-50">
+                    {data.routineCatchUpBreaches.totalBreaches} catch-up cap breach{data.routineCatchUpBreaches.totalBreaches === 1 ? "" : "es"}
+                  </p>
+                  <p className="text-xs text-amber-100/70">
+                    {data.routineCatchUpBreaches.totalMissedRuns} total missed runs · {data.routineCatchUpBreaches.totalDroppedRuns} dropped ({data.routineCatchUpBreaches.maxDroppedInSingleBreach} max dropped per breach)
+                  </p>
+                </div>
+              </div>
+              <Link to="/routines" className="text-sm underline underline-offset-2 text-amber-100">
+                Review routines
+              </Link>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-1 sm:gap-2">
             <MetricCard

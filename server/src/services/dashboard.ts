@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { agents, agentWakeupRequests, approvals, companies, costEvents, heartbeatRuns, issues } from "@paperclipai/db";
+import { agents, agentWakeupRequests, approvals, companies, costEvents, heartbeatRuns, issues, routineCatchUpBreaches } from "@paperclipai/db";
 import { notFound } from "../errors.js";
 import { budgetService } from "./budgets.js";
 
@@ -31,6 +31,7 @@ interface StuckRunHistoricalData {
   warningCount: number;
   criticalCount: number;
   dismissedCount: number;
+  cancellationCount: number;
   avgScore: number;
 }
 
@@ -38,7 +39,7 @@ function formatUtcDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function getUtcMonthStart(date: Date): Date {
+function getUtcMonthStart(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
@@ -48,6 +49,28 @@ function getRecentUtcDateKeys(now: Date, days: number): string[] {
     const dayOffset = index - (days - 1);
     return formatUtcDateKey(new Date(todayUtc + dayOffset * 24 * 60 * 60 * 1000));
   });
+}
+
+function getRoutineCatchUpBreachesSummary(db: Db, companyId: string) {
+  return db
+    .select({
+      totalBreaches: sql<number>`count(*)`,
+      totalMissedRuns: sql<number>`coalesce(sum(${routineCatchUpBreaches.missedCount}), 0)`,
+      maxMissedInSingleBreach: sql<number>`coalesce(max(${routineCatchUpBreaches.missedCount}), 0)`,
+      acknowledgedCount: sql<number>`count(*) filter (where ${routineCatchUpBreaches.acknowledgedAt} is not null)`,
+    })
+    .from(routineCatchUpBreaches)
+    .where(eq(routineCatchUpBreaches.companyId, companyId))
+    .then((rows) => {
+      const summary = rows[0];
+      return {
+        totalBreaches: Number(summary?.totalBreaches ?? 0),
+        totalMissedRuns: Number(summary?.totalMissedRuns ?? 0),
+        maxMissedInSingleBreach: Number(summary?.maxMissedInSingleBreach ?? 0),
+        acknowledgedCount: Number(summary?.acknowledgedCount ?? 0),
+        hasUnacknowledgedBreaches: (summary?.acknowledgedCount ?? 0) < (summary?.totalBreaches ?? 0),
+      };
+    });
 }
 
 export function dashboardService(db: Db) {
@@ -184,6 +207,7 @@ export function dashboardService(db: Db) {
           pausedProjects: budgetOverview.pausedProjectCount,
         },
         runActivity: Array.from(runActivity.values()),
+        routineCatchUpBreaches: await getRoutineCatchUpBreachesSummary(db, companyId),
       };
     },
     queueHealth: async (companyId: string) => {
@@ -601,6 +625,53 @@ export function dashboardService(db: Db) {
       const estimatedSavedCents = warningsPosted * avgCostPerStuckRunCents;
       const potentialSavingsCents = (totalFlagged - warningsPosted) * avgCostPerStuckRunCents;
 
+      // Phase 3: Calculate escalation metrics (auto-cancellations and admin reviews)
+      const autoCancellationsQuery = await db
+        .select({
+          count: sql<number>`count(*)::int`,
+          avgGracePeriodMinutes: sql<number>`avg(extract(epoch from (stuck_cancelled_at - stuck_grace_period_started_at))/60)::int`,
+        })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            gte(heartbeatRuns.stuckCancelledAt, periodStart),
+            eq(heartbeatRuns.stuckCancelledBy, "auto_escalation"),
+          ),
+        );
+      
+      const totalAutoCancellations = autoCancellationsQuery[0]?.count ?? 0;
+      const avgGracePeriodMinutes = autoCancellationsQuery[0]?.avgGracePeriodMinutes ?? 15;
+      
+      // Query for admin review tasks created in period
+      const adminReviewsQuery = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            gte(heartbeatRuns.stuckAdminReviewCreatedAt, periodStart),
+            sql`${heartbeatRuns.stuckAdminReviewTaskId} is not null`,
+          ),
+        );
+      
+      const totalAdminReviews = adminReviewsQuery[0]?.count ?? 0;
+      
+      // Query total runs in period for cancellation rate calculation
+      const totalRunsQuery = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            gte(heartbeatRuns.createdAt, periodStart),
+          ),
+        );
+      
+      const totalRuns = totalRunsQuery[0]?.count ?? 0;
+      const cancellationRate = totalRuns > 0 ? totalAutoCancellations / totalRuns : 0;
+      const cancellationRatePercent = Math.round(cancellationRate * 10000) / 100; // 2 decimal places
+
       // Build historical data (last 14 days)
       const historicalData: StuckRunHistoricalData[] = [];
       for (let i = 13; i >= 0; i--) {
@@ -608,11 +679,24 @@ export function dashboardService(db: Db) {
         const dateStr = date.toISOString().slice(0, 10);
         const dayRuns = flaggedRuns.filter((r) => r.detectedAt.startsWith(dateStr));
         
+        // Query cancellations for this day
+        const dayCancellations = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(heartbeatRuns)
+          .where(
+            and(
+              eq(heartbeatRuns.companyId, companyId),
+              sql`date_trunc('day', ${heartbeatRuns.stuckCancelledAt}) = date_trunc('day', ${new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString()}::timestamp)`,
+              eq(heartbeatRuns.stuckCancelledBy, "auto_escalation"),
+            ),
+          );
+        
         historicalData.push({
           date: dateStr,
           warningCount: dayRuns.filter((r) => r.stuckStatus === "warning").length,
           criticalCount: dayRuns.filter((r) => r.stuckStatus === "critical").length,
           dismissedCount: dayRuns.filter((r) => r.warningDismissedAt !== null).length,
+          cancellationCount: dayCancellations[0]?.count ?? 0,
           avgScore: dayRuns.length > 0
             ? Math.round(dayRuns.reduce((sum, r) => sum + r.stuckScore, 0) / dayRuns.length * 10) / 10
             : 0,
@@ -633,13 +717,15 @@ export function dashboardService(db: Db) {
       if (detectionFrequencyPerDay > 5) anomalousPatterns.push("high_detection_frequency");
       if (activeCritical > 3) anomalousPatterns.push("multiple_critical_stuck_runs");
       if (meanTimeToDetectionHours > 48) anomalousPatterns.push("slow_detection");
+      // Phase 3: Cancellation rate threshold (< 2%)
+      if (cancellationRate > 0.02) anomalousPatterns.push("high_cancellation_rate");
 
       let alertStatus: "normal" | "warning" | "critical" = "normal";
       let recommendation: string | null = null;
 
-      if (activeCritical > 5 || falsePositiveRate > 0.5) {
+      if (activeCritical > 5 || falsePositiveRate > 0.5 || cancellationRate > 0.02) {
         alertStatus = "critical";
-        recommendation = "Urgent: Multiple critical stuck runs or high false positive rate. Review detection thresholds and investigate stuck runs immediately.";
+        recommendation = "Urgent: Multiple critical stuck runs, high false positive rate, or cancellation rate exceeds 2%. Review detection thresholds immediately.";
       } else if (activeWarnings > 10 || falsePositiveRate > 0.3) {
         alertStatus = "warning";
         recommendation = "Warning: Elevated stuck run activity. Consider reviewing detection accuracy and agent workload balance.";
@@ -679,6 +765,14 @@ export function dashboardService(db: Db) {
           avgHoursSavedPerRun,
           periodDays,
         },
+        // Phase 3: Escalation and cancellation metrics
+        escalation: {
+          totalAdminReviews,
+          totalAutoCancellations,
+          cancellationRate,
+          cancellationRatePercent,
+          avgGracePeriodMinutes,
+        },
         flaggedRuns: flaggedRuns.slice(0, 100), // Limit to last 100 for performance
         historicalData,
         alerting: {
@@ -686,6 +780,137 @@ export function dashboardService(db: Db) {
           anomalousPatterns,
           recommendation,
         },
+      };
+    },
+
+    routineCatchUpBreaches: async (companyId: string, periodDays: number = 30) => {
+      const company = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, companyId))
+        .then((rows) => rows[0] ?? null);
+
+      if (!company) throw notFound("Company not found");
+
+      const now = new Date();
+      const periodStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+
+      const breachQuery = await db
+        .select({
+          id: routineCatchUpBreaches.id,
+          routineId: routineCatchUpBreaches.routineId,
+          triggerId: routineCatchUpBreaches.triggerId,
+          missedCount: routineCatchUpBreaches.missedCount,
+          capValue: routineCatchUpBreaches.capValue,
+          droppedCount: routineCatchUpBreaches.droppedCount,
+          detectedAt: routineCatchUpBreaches.detectedAt,
+          acknowledgedAt: routineCatchUpBreaches.acknowledgedAt,
+          acknowledgedByAgentId: routineCatchUpBreaches.acknowledgedByAgentId,
+          acknowledgedByUserId: routineCatchUpBreaches.acknowledgedByUserId,
+        })
+        .from(routineCatchUpBreaches)
+        .where(
+          and(
+            eq(routineCatchUpBreaches.companyId, companyId),
+            gte(routineCatchUpBreaches.detectedAt, periodStart),
+          ),
+        )
+        .orderBy(desc(routineCatchUpBreaches.detectedAt));
+
+      const breachCount = breachQuery.length;
+      const totalMissedRuns = breachQuery.reduce((sum, b) => sum + b.missedCount, 0);
+      const totalDroppedRuns = breachQuery.reduce((sum, b) => sum + b.droppedCount, 0);
+      const maxMissedInSingleBreach = Math.max(...breachQuery.map((b) => b.missedCount), 0);
+      const maxDroppedInSingleBreach = Math.max(...breachQuery.map((b) => b.droppedCount), 0);
+      const acknowledgedCount = breachQuery.filter((b) => b.acknowledgedAt !== null).length;
+
+      const dailyBreachCounts = new Map<string, number>();
+      for (const breach of breachQuery) {
+        const dateKey = breach.detectedAt.toISOString().slice(0, 10);
+        dailyBreachCounts.set(dateKey, (dailyBreachCounts.get(dateKey) ?? 0) + 1);
+      }
+
+      const peakBreachDay = Array.from(dailyBreachCounts.entries()).sort((a, b) => b[1] - a[1])[0];
+
+      const hasUnacknowledgedBreaches = acknowledgedCount < breachCount;
+
+      const routineIds = [...new Set(breachQuery.map((b) => b.routineId))];
+      const triggerIds = [...new Set(breachQuery.filter((b) => b.triggerId).map((b) => b.triggerId!))];
+
+      const routineBreachDetails = {
+        companyId,
+        periodDays,
+        generatedAt: now.toISOString(),
+        summary: {
+          totalBreaches: breachCount,
+          totalMissedRuns,
+          totalDroppedRuns,
+          maxMissedInSingleBreach,
+          maxDroppedInSingleBreach,
+          acknowledgedCount,
+          hasUnacknowledgedBreaches,
+        },
+        routineIds,
+        triggerIds,
+        dailyDistribution: Array.from(dailyBreachCounts.entries()).map(([date, count]) => ({
+          date,
+          breachCount: count,
+        })),
+        peakBreachDay: peakBreachDay
+          ? { date: peakBreachDay[0], breachCount: peakBreachDay[1] }
+          : null,
+        recentBreaches: breachQuery.slice(0, 100).map((b) => ({
+          id: b.id,
+          routineId: b.routineId,
+          triggerId: b.triggerId,
+          missedCount: b.missedCount,
+          capValue: b.capValue,
+          droppedCount: b.droppedCount,
+          detectedAt: b.detectedAt.toISOString(),
+          acknowledgedAt: b.acknowledgedAt?.toISOString() ?? null,
+          acknowledgedByAgentId: b.acknowledgedByAgentId,
+          acknowledgedByUserId: b.acknowledgedByUserId,
+        })),
+      };
+
+      return routineBreachDetails;
+    },
+
+    // Stub for taskAgeReport - TODO: Implement full task age reporting
+    taskAgeReport: async (companyId: string, periodDays: number = 30) => {
+      const company = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, companyId))
+        .then((rows) => rows[0] ?? null);
+
+      if (!company) throw notFound("Company not found");
+
+      // Return minimal stub implementation
+      return {
+        companyId,
+        generatedAt: new Date().toISOString(),
+        periodDays,
+        freshnessThresholds: {
+          healthyMaxAgeHours: 168,
+          warningMaxAgeHours: 336,
+          criticalMaxAgeHours: 720,
+        },
+        summary: {
+          totalTasks: 0,
+          avgAgeHours: 0,
+          medianAgeHours: 0,
+          oldestTaskHours: 0,
+          newestTaskHours: 0,
+          status: "fresh" as const,
+          freshnessScore: 100,
+          alert: null,
+        },
+        ageDistribution: [],
+        byStatus: [],
+        byAgent: [],
+        oldestTasks: [],
+        recommendations: [],
       };
     },
   };
