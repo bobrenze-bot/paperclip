@@ -42,6 +42,12 @@ function normalizeExperimentalSettings(raw: unknown): InstanceExperimentalSettin
       enableIsolatedWorkspaces: parsed.data.enableIsolatedWorkspaces ?? false,
       autoRestartDevServerWhenIdle: parsed.data.autoRestartDevServerWhenIdle ?? false,
       stuckDetection: parsed.data.stuckDetection ?? false,
+      // Phase 3: Stuck-Run Auto-Escalation settings
+      stuckAutoEscalationEnabled: parsed.data.stuckAutoEscalationEnabled ?? false,
+      stuckAutoEscalationKillSwitch: parsed.data.stuckAutoEscalationKillSwitch ?? false,
+      stuckMaxCompanyEscalationsPerHour: parsed.data.stuckMaxCompanyEscalationsPerHour ?? 10,
+      stuckMaxAgentEscalationsPerDay: parsed.data.stuckMaxAgentEscalationsPerDay ?? 3,
+      stuckGracePeriodMinutes: parsed.data.stuckGracePeriodMinutes ?? 15,
     };
   }
   return {
@@ -49,6 +55,12 @@ function normalizeExperimentalSettings(raw: unknown): InstanceExperimentalSettin
     enableIsolatedWorkspaces: false,
     autoRestartDevServerWhenIdle: false,
     stuckDetection: false,
+    // Phase 3: Stuck-Run Auto-Escalation settings (defaults)
+    stuckAutoEscalationEnabled: false,
+    stuckAutoEscalationKillSwitch: false,
+    stuckMaxCompanyEscalationsPerHour: 10,
+    stuckMaxAgentEscalationsPerDay: 3,
+    stuckGracePeriodMinutes: 15,
   };
 }
 

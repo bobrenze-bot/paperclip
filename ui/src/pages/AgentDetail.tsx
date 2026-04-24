@@ -1231,6 +1231,19 @@ function LatestRunCard({ runs, agentId }: { runs: HeartbeatRun[]; agentId: strin
         <div className="flex items-center gap-2">
           <StatusIcon className={cn("h-3.5 w-3.5", statusInfo.color, run.status === "running" && "animate-spin")} />
           <StatusBadge status={run.status} />
+          {/* Stuck Run Warning Indicator - Phase 2 */}
+          {(run.stuckStatus === "warning" || run.stuckStatus === "critical") && (
+            <span className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+              run.stuckStatus === "critical" 
+                ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" 
+                : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+            )}>
+              <Timer className="h-3 w-3" />
+              {run.stuckStatus === "critical" ? "Stuck (Critical)" : "May Be Stuck"}
+              {run.stuckScore !== null && ` (${run.stuckScore}/10)`}
+            </span>
+          )}
           <span className="font-mono text-xs text-muted-foreground">{run.id.slice(0, 8)}</span>
           <span className={cn(
             "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
@@ -2905,6 +2918,18 @@ function RunListItem({ run, isSelected, agentId }: { run: HeartbeatRun; isSelect
         )}>
           {sourceLabels[run.invocationSource] ?? run.invocationSource}
         </span>
+        {/* Stuck Run Warning Indicator - Phase 2 */}
+        {(run.stuckStatus === "warning" || run.stuckStatus === "critical") && (
+          <span className={cn(
+            "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0",
+            run.stuckStatus === "critical" 
+              ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300" 
+              : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+          )}>
+            <Timer className="h-3 w-3" />
+            {run.stuckStatus === "critical" ? "Critical" : "Stuck?"}
+          </span>
+        )}
         <span className="ml-auto text-[11px] text-muted-foreground shrink-0">
           {relativeTime(run.createdAt)}
         </span>

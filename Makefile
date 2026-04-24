@@ -56,3 +56,14 @@ test-conversation-partner:
 test-conversation-partner-verbose:
 	@echo "Running conversation partner scoping tests (verbose)..."
 	@python3 -m unittest -v $(BOB_ROOT)tests/test_conversation_partner_scoping
+
+# Deployment Gate Test Targets
+.PHONY: test-deployment-gate test-deployment-gate-verbose
+
+test-deployment-gate:
+	@echo "Running pre-deployment memory gate check..."
+	@bash $(BOB_ROOT)tests/memory-regression/check-deployment-gate.sh
+
+test-deployment-gate-verbose:
+	@echo "Running pre-deployment memory gate check (verbose)..."
+	@bash $(BOB_ROOT)tests/memory-regression/check-deployment-gate.sh -v

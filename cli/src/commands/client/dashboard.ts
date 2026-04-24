@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import type { DashboardSummary } from "@paperclipai/shared";
+import type { DashboardSummary, AssigneeStarvation } from "@paperclipai/shared";
 import {
   addCommonClientOptions,
   handleCommandError,
@@ -19,6 +19,11 @@ interface PerformanceOptions extends BaseClientOptions {
 
 interface WeeklyReportOptions extends BaseClientOptions {
   companyId?: string;
+}
+
+interface AssigneeStarvationOptions extends BaseClientOptions {
+  companyId?: string;
+  threshold?: string;
 }
 
 export function registerDashboardCommands(program: Command): void {
@@ -74,6 +79,27 @@ export function registerDashboardCommands(program: Command): void {
             `/api/companies/${ctx.companyId}/dashboard/performance/weekly-report`
           );
           printOutput(report, { json: ctx.json });
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+    { includeCompany: false },
+  );
+
+  addCommonClientOptions(
+    dashboard
+      .command("assignee-starvation")
+      .description("Detect assignee starvation - tasks assigned but not being worked on")
+      .requiredOption("-C, --company-id <id>", "Company ID")
+      .option("-t, --threshold <hours>", "Staleness threshold in hours (default: 24)", "24")
+      .action(async (opts: AssigneeStarvationOptions) => {
+        try {
+          const ctx = resolveCommandContext(opts, { requireCompany: true });
+          const threshold = parseInt(opts.threshold || "24", 10);
+          const starvation = await ctx.api.get<AssigneeStarvation>(
+            `/api/companies/${ctx.companyId}/dashboard/assignee-starvation?threshold=${threshold}`
+          );
+          printOutput(starvation, { json: ctx.json });
         } catch (err) {
           handleCommandError(err);
         }

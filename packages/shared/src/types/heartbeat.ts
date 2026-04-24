@@ -53,6 +53,9 @@ export interface HeartbeatRun {
   stuckStatus: string | null;
   lastStuckCheckAt: Date | null;
   stuckCheckCount: number;
+  stuckWarningCommentPostedAt: Date | null;
+  stuckWarningDismissedAt: Date | null;
+  stuckWarningDismissedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

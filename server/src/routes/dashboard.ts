@@ -36,5 +36,21 @@ export function dashboardRoutes(db: Db) {
     res.json(report);
   });
 
+  router.get("/companies/:companyId/dashboard/assignee-starvation", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const thresholdHours = req.query.threshold ? parseInt(req.query.threshold as string, 10) : 24;
+    const starvation = await svc.assigneeStarvation(companyId, thresholdHours);
+    res.json(starvation);
+  });
+
+  router.get("/companies/:companyId/dashboard/stuck-runs", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const periodDays = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+    const metrics = await svc.stuckRunMetrics(companyId, periodDays);
+    res.json(metrics);
+  });
+
   return router;
 }

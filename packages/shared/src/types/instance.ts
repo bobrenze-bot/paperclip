@@ -28,6 +28,12 @@ export interface InstanceExperimentalSettings {
   enableIsolatedWorkspaces: boolean;
   autoRestartDevServerWhenIdle: boolean;
   stuckDetection: boolean;
+  // Phase 3: Stuck-Run Auto-Escalation settings
+  stuckAutoEscalationEnabled: boolean;
+  stuckAutoEscalationKillSwitch: boolean;
+  stuckMaxCompanyEscalationsPerHour: number;
+  stuckMaxAgentEscalationsPerDay: number;
+  stuckGracePeriodMinutes: number;
 }
 
 export interface InstanceSettings {

@@ -112,3 +112,26 @@ export const routineRuns = pgTable(
     idempotencyIdx: index("routine_runs_trigger_idempotency_idx").on(table.triggerId, table.idempotencyKey),
   }),
 );
+
+export const routineCatchUpBreaches = pgTable(
+  "routine_catch_up_breaches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    routineId: uuid("routine_id").notNull().references(() => routines.id, { onDelete: "cascade" }),
+    triggerId: uuid("trigger_id").references(() => routineTriggers.id, { onDelete: "set null" }),
+    missedCount: integer("missed_count").notNull(),
+    capValue: integer("cap_value").notNull().default(25),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    acknowledgedByAgentId: uuid("acknowledged_by_agent_id").references(() => agents.id, { onDelete: "set null" }),
+    acknowledgedByUserId: text("acknowledged_by_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    companyRoutineIdx: index("routine_catch_up_breaches_company_routine_idx").on(table.companyId, table.routineId, table.detectedAt),
+    routineTriggerIdx: index("routine_catch_up_breaches_routine_trigger_idx").on(table.routineId, table.triggerId, table.detectedAt),
+    detectedAtIdx: index("routine_catch_up_breaches_detected_at_idx").on(table.detectedAt),
+  }),
+);

@@ -37,6 +37,12 @@ export const instanceExperimentalSettingsSchema = z.object({
   enableIsolatedWorkspaces: z.boolean().default(false),
   autoRestartDevServerWhenIdle: z.boolean().default(false),
   stuckDetection: z.boolean().default(false),
+  // Phase 3: Stuck-Run Auto-Escalation settings
+  stuckAutoEscalationEnabled: z.boolean().default(false),
+  stuckAutoEscalationKillSwitch: z.boolean().default(false),
+  stuckMaxCompanyEscalationsPerHour: z.number().default(10),
+  stuckMaxAgentEscalationsPerDay: z.number().default(3),
+  stuckGracePeriodMinutes: z.number().default(15),
 }).strict();
 
 export const patchInstanceExperimentalSettingsSchema = instanceExperimentalSettingsSchema.partial();

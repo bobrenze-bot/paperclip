@@ -216,6 +216,10 @@ export type {
   DashboardSummary,
   QueueHealth,
   QueueHealthRefillRisk,
+  AssigneeStarvation,
+  AssigneeStarvationSummary,
+  AssigneeStarvationAgent,
+  AssigneeStarvationTask,
 } from "./dashboard.js";
 export type { ActivityEvent } from "./activity.js";
 export type {

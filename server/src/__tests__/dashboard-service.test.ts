@@ -268,4 +268,198 @@ describeEmbeddedPostgres("dashboard service", () => {
 
     await expect(dashboardService(db).queueHealth(randomId)).rejects.toThrow("Company not found");
   });
+
+  it("detects assignee starvation for stale assigned tasks", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const staleUpdatedAt = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours ago
+    const recentUpdatedAt = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "TestAgent",
+      role: "engineer",
+      status: "running",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values([
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Stale assigned task 1",
+        status: "in_progress",
+        assigneeAgentId: agentId,
+        updatedAt: staleUpdatedAt,
+      },
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Stale assigned task 2",
+        status: "todo",
+        assigneeAgentId: agentId,
+        updatedAt: staleUpdatedAt,
+      },
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Recent assigned task",
+        status: "in_progress",
+        assigneeAgentId: agentId,
+        updatedAt: recentUpdatedAt,
+      },
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Unassigned stale task",
+        status: "todo",
+        updatedAt: staleUpdatedAt,
+      },
+    ]);
+
+    const starvation = await dashboardService(db).assigneeStarvation(companyId, 24);
+
+    expect(starvation.summary.totalAssigned).toBe(3);
+    expect(starvation.summary.starvedCount).toBe(2);
+    expect(starvation.summary.starvationRatio).toBe(2 / 3);
+    expect(starvation.summary.status).toBe("warning");
+    expect(starvation.summary.alert).toMatch(/WARNING.*67% of assigned tasks are starved/);
+
+    expect(starvation.agents).toHaveLength(1);
+    expect(starvation.agents[0]).toMatchObject({
+      agentId,
+      agentName: "TestAgent",
+      agentStatus: "running",
+      starvedCount: 2,
+    });
+
+    expect(starvation.agents[0].tasks).toHaveLength(2);
+    expect(starvation.agents[0].oldestTaskHours).toBeGreaterThanOrEqual(48);
+    expect(starvation.agents[0].avgStalenessHours).toBeGreaterThanOrEqual(48);
+  });
+
+  it("returns normal status when no starvation detected", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const recentUpdatedAt = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "TestAgent",
+      role: "engineer",
+      status: "running",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values([
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Recent task 1",
+        status: "in_progress",
+        assigneeAgentId: agentId,
+        updatedAt: recentUpdatedAt,
+      },
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Recent task 2",
+        status: "todo",
+        assigneeAgentId: agentId,
+        updatedAt: recentUpdatedAt,
+      },
+    ]);
+
+    const starvation = await dashboardService(db).assigneeStarvation(companyId, 24);
+
+    expect(starvation.summary.totalAssigned).toBe(2);
+    expect(starvation.summary.starvedCount).toBe(0);
+    expect(starvation.summary.starvationRatio).toBe(0);
+    expect(starvation.summary.status).toBe("normal");
+    expect(starvation.summary.alert).toBeNull();
+    expect(starvation.agents).toHaveLength(0);
+  });
+
+  it("detects critical starvation when >50% of tasks are starved", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const staleUpdatedAt = new Date(Date.now() - 72 * 60 * 60 * 1000); // 72 hours ago
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "StarvedAgent",
+      role: "engineer",
+      status: "idle",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values([
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Stale task 1",
+        status: "in_progress",
+        assigneeAgentId: agentId,
+        updatedAt: staleUpdatedAt,
+      },
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Stale task 2",
+        status: "todo",
+        assigneeAgentId: agentId,
+        updatedAt: staleUpdatedAt,
+      },
+      {
+        id: randomUUID(),
+        companyId,
+        title: "Stale task 3",
+        status: "in_review",
+        assigneeAgentId: agentId,
+        updatedAt: staleUpdatedAt,
+      },
+    ]);
+
+    const starvation = await dashboardService(db).assigneeStarvation(companyId, 24);
+
+    expect(starvation.summary.totalAssigned).toBe(3);
+    expect(starvation.summary.starvedCount).toBe(3);
+    expect(starvation.summary.starvationRatio).toBe(1);
+    expect(starvation.summary.status).toBe("critical");
+    expect(starvation.summary.alert).toMatch(/CRITICAL.*100% of assigned tasks are starved/);
+    expect(starvation.agents[0].starvedCount).toBe(3);
+  });
 });

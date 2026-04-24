@@ -1707,6 +1707,7 @@ export function issueRoutes(
       contextSource: "issue.create",
       requestedByActorType: actor.actorType,
       requestedByActorId: actor.actorId,
+      rethrowOnError: false,
     });
 
     res.status(201).json({
@@ -1768,6 +1769,7 @@ export function issueRoutes(
       contextSource: "issue.child_create",
       requestedByActorType: actor.actorType,
       requestedByActorId: actor.actorId,
+      rethrowOnError: false,
     });
 
     res.status(201).json(issue);
@@ -2840,6 +2842,7 @@ export function issueRoutes(
           contextSource: "issue.interaction.accept",
           requestedByActorType: actor.actorType,
           requestedByActorId: actor.actorId,
+          rethrowOnError: false,
         });
       }
 

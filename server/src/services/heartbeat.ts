@@ -7802,6 +7802,64 @@ export function heartbeatService(db: Db) {
       return run ?? null;
     },
 
+    // Phase 3: Check circuit breakers for stuck run auto-escalation
+    checkStuckEscalationCircuitBreakers: async (companyId: string, agentId: string) => {
+      const instanceSettings = instanceSettingsService(db);
+      const config = await instanceSettings.getExperimental();
+      
+      // Check kill switch (global disable)
+      if (config.stuckAutoEscalationKillSwitch === true) {
+        return { allowed: false, reason: "kill_switch_enabled" };
+      }
+      
+      // Check per-agent opt-out
+      const agent = await getAgent(agentId);
+      if (agent?.metadata?.stuckAutoEscalationOptOut === true) {
+        return { allowed: false, reason: "agent_opt_out" };
+      }
+      
+      // Check per-company rate limit (max 10 escalations per hour)
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentCancellations = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            gt(heartbeatRuns.stuckCancelledAt, oneHourAgo),
+            eq(heartbeatRuns.stuckCancelledBy, "auto_escalation")
+          )
+        )
+        .then(rows => rows[0]?.count ?? 0);
+      
+      const maxCompanyEscalationsPerHour = config.stuckMaxCompanyEscalationsPerHour ?? 10;
+      if (recentCancellations >= maxCompanyEscalationsPerHour) {
+        return { allowed: false, reason: "company_rate_limit_exceeded" };
+      }
+      
+      // Check per-agent rate limit (max 3 escalations per day)
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentAgentCancellations = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            eq(heartbeatRuns.agentId, agentId),
+            gt(heartbeatRuns.stuckCancelledAt, oneDayAgo),
+            eq(heartbeatRuns.stuckCancelledBy, "auto_escalation")
+          )
+        )
+        .then(rows => rows[0]?.count ?? 0);
+      
+      const maxAgentEscalationsPerDay = config.stuckMaxAgentEscalationsPerDay ?? 3;
+      if (recentAgentCancellations >= maxAgentEscalationsPerDay) {
+        return { allowed: false, reason: "agent_rate_limit_exceeded" };
+      }
+      
+      return { allowed: true };
+    },
+
     detectStuckRuns: async (dryRun = true) => {
       const instanceSettings = instanceSettingsService(db);
       const config = await instanceSettings.getExperimental();
@@ -7818,12 +7876,21 @@ export function heartbeatService(db: Db) {
         .select({
           id: heartbeatRuns.id,
           agentId: heartbeatRuns.agentId,
+          companyId: heartbeatRuns.companyId,
           status: heartbeatRuns.status,
           startedAt: heartbeatRuns.startedAt,
           lastStuckCheckAt: heartbeatRuns.lastStuckCheckAt,
           stuckScore: heartbeatRuns.stuckScore,
           stuckStatus: heartbeatRuns.stuckStatus,
           stuckCheckCount: heartbeatRuns.stuckCheckCount,
+          stuckWarningCommentPostedAt: heartbeatRuns.stuckWarningCommentPostedAt,
+          stuckWarningDismissedAt: heartbeatRuns.stuckWarningDismissedAt,
+          stuckAdminReviewTaskId: heartbeatRuns.stuckAdminReviewTaskId,
+          stuckCancelledAt: heartbeatRuns.stuckCancelledAt,
+          stuckGracePeriodStartedAt: heartbeatRuns.stuckGracePeriodStartedAt,
+          stuckRetryOfRunId: heartbeatRuns.stuckRetryOfRunId,
+          stuckRetryCount: heartbeatRuns.stuckRetryCount,
+          stuckCircuitBreakerTriggered: heartbeatRuns.stuckCircuitBreakerTriggered,
           nextAction: heartbeatRuns.nextAction,
           livenessState: heartbeatRuns.livenessState,
           livenessReason: heartbeatRuns.livenessReason,
@@ -7882,16 +7949,301 @@ export function heartbeatService(db: Db) {
           reason.push("agent_status=" + agent!.status);
         }
 
+        // Phase 2: Adjusted thresholds based on Phase 1 data
+        // Warning threshold raised from 5 to 6 to reduce false positives
         if (score >= 10) {
           status = "critical";
           detectedCount++;
-        } else if (score >= 5) {
+        } else if (score >= 6) {
           status = "warning";
+          detectedCount++;
         }
 
         logger.info(`stuck_detection: run=${run.id} score=${score} status=${status} reason=${reason.join(", ")}`);
 
-        if (!dryRun && (status !== "none" || !run.lastStuckCheckAt)) {
+        // Phase 2: Post warning comment for runs with score >= 6
+        let warningCommentPosted = false;
+        if (!dryRun && status !== "none" && score >= 6) {
+          // Check if we already posted a warning for this run
+          if (!run.stuckWarningCommentPostedAt) {
+            try {
+              const issuesSvc = issueService(db);
+              
+              // Find the associated issue for this run
+              const runDetails = await db
+                .select({ issueId: heartbeatRuns.wakeupRequestId })
+                .from(heartbeatRuns)
+                .where(eq(heartbeatRuns.id, run.id))
+                .then(rows => rows[0]);
+              
+              if (runDetails?.issueId) {
+                // Check if there's already a dismissal comment
+                const recentComments = await db
+                  .select({ body: issueComments.body, createdAt: issueComments.createdAt })
+                  .from(issueComments)
+                  .where(
+                    and(
+                      eq(issueComments.issueId, runDetails.issueId),
+                      gt(issueComments.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000)) // Last 24 hours
+                    )
+                  )
+                  .orderBy(desc(issueComments.createdAt))
+                  .limit(10);
+                
+                // Check for dismissal patterns
+                const dismissalPatterns = [
+                  /dismissed?\s+(?:the\s+)?(?:stuck\s+)?warning/i,
+                  /(?:stuck\s+)?warning\s+(?:is\s+)?(?:false\s+)?positive/i,
+                  /(?:not\s+)?stuck/i,
+                  /(?:working|progressing)\s+(?:as\s+)?expected/i,
+                ];
+                
+                const hasDismissal = recentComments.some(comment => 
+                  dismissalPatterns.some(pattern => pattern.test(comment.body))
+                );
+                
+                if (!hasDismissal) {
+                  // Post warning comment
+                  const warningBody = `⚠️ **Stuck Run Warning** (Score: ${score}/10)
+
+This run may be stuck based on the following indicators:
+${reason.map(r => `- ${r}`).join('\n')}
+
+**Recommended Actions:**
+1. Review the run transcript for signs of repetition or lack of progress
+2. If this is a false positive, reply with "dismiss stuck warning" or "false positive"
+3. Consider terminating the run if it's genuinely stuck
+
+Run ID: ${run.id}
+Agent: ${agent?.name || run.agentId}
+Duration: ${hoursRunning} hour(s)`;
+
+                  await issuesSvc.addComment(runDetails.issueId, warningBody, {
+                    runId: run.id,
+                  });
+                  
+                  warningCommentPosted = true;
+                  logger.info(`stuck_detection: Posted warning comment for run=${run.id} issue=${runDetails.issueId}`);
+
+                  // Phase 3: Auto-escalation features (if enabled)
+                  const autoEscalationEnabled = config.stuckAutoEscalationEnabled ?? false;
+                  
+                  if (autoEscalationEnabled && !dryRun && score >= 8) {
+                    // Check circuit breakers first
+                    const circuitCheck = await heartbeatService(db).checkStuckEscalationCircuitBreakers(
+                      run.companyId,
+                      run.agentId
+                    );
+                    
+                    if (circuitCheck.allowed) {
+                      // Phase 3.1: Admin review task for score >= 8 (but not yet critical)
+                      if (score >= 8 && score < 10 && !run.stuckAdminReviewTaskId) {
+                        try {
+                          const adminReviewTask = await issuesSvc.create(run.companyId, {
+                            title: `[ADMIN REVIEW] Stuck run detected for agent ${agent?.name || run.agentId}`,
+                            description: `## Admin Review Required
+
+A heartbeat run has been flagged as potentially stuck and requires admin review.
+
+**Run Details:**
+- Run ID: ${run.id}
+- Agent: ${agent?.name || run.agentId}
+- Issue: [Link to issue](/BOB/issues/${runDetails.issueId})
+- Score: ${score}/10
+- Duration: ${hoursRunning} hour(s)
+
+**Indicators:**
+${reason.map(r => `- ${r}`).join('\n')}
+
+**Recommended Actions:**
+1. Review the run transcript
+2. If genuinely stuck: Cancel the run and create recovery task
+3. If false positive: Update thresholds or dismiss warning
+4. If agent needs help: Reassign or provide guidance
+
+**Auto-Escalation Context:**
+This task was auto-created by the stuck-run detection system (Phase 3).
+
+**Parent Run:** ${run.id}`,
+                            status: "todo",
+                            priority: "high",
+                          });
+                          
+                          logger.info(`stuck_detection: Created admin review task for run=${run.id} task=${adminReviewTask.id}`);
+                          
+                          // Update run with admin review task ID
+                          await db
+                            .update(heartbeatRuns)
+                            .set({
+                              stuckAdminReviewTaskId: adminReviewTask.id,
+                              stuckAdminReviewCreatedAt: now,
+                              stuckAdminReviewNotifiedAt: now,
+                              updatedAt: now,
+                            })
+                            .where(eq(heartbeatRuns.id, run.id));
+                          
+                          // Post comment to original issue
+                          await issuesSvc.addComment(runDetails.issueId, `🔍 **Admin Review Task Created**
+
+An admin review task has been created for this stuck run.
+
+**Review Task:** [${adminReviewTask.identifier || adminReviewTask.id}](/BOB/issues/${adminReviewTask.id})
+**Score:** ${score}/10 (threshold: ≥8)
+**Reasons:** ${reason.join(', ')}
+
+An administrator will review this run and determine next steps.`, {
+                            runId: run.id,
+                          });
+                        } catch (err) {
+                          logger.error({ err, runId: run.id }, "stuck_detection: Failed to create admin review task");
+                        }
+                      }
+
+                      // Phase 3.2: Auto-cancellation for score >= 10 (critical)
+                      if (status === "critical" && score >= 10 && !run.stuckCancelledAt) {
+                        try {
+                          const gracePeriodMinutes = config.stuckGracePeriodMinutes ?? 15;
+                          const gracePeriodMs = gracePeriodMinutes * 60 * 1000;
+                          
+                          // Check if grace period has already started
+                          if (!run.stuckGracePeriodStartedAt) {
+                            // Start grace period
+                            await db
+                              .update(heartbeatRuns)
+                              .set({
+                                stuckGracePeriodStartedAt: now,
+                                updatedAt: now,
+                              })
+                              .where(eq(heartbeatRuns.id, run.id));
+                            
+                            logger.info(`stuck_detection: Started ${gracePeriodMinutes}min grace period for run=${run.id}`);
+                            
+                            // Post grace period notification
+                            await issuesSvc.addComment(runDetails.issueId, `🚨 **Critical Stuck Run - Grace Period Started**
+
+This run has been flagged as **critical** (score: ${score}/10) and will be automatically cancelled in **${gracePeriodMinutes} minutes**.
+
+**To prevent cancellation:**
+1. Post any comment on this issue to show progress
+2. Reply "not stuck" if this is a false positive
+3. Contact an admin if you need more time
+
+**Auto-cancellation at:** ${new Date(now.getTime() + gracePeriodMs).toISOString()}
+
+**Indicators:**
+${reason.map(r => `- ${r}`).join('\n')}`, {
+                              runId: run.id,
+                            });
+                          } else {
+                            // Check if grace period has elapsed
+                            const gracePeriodElapsed = new Date(run.stuckGracePeriodStartedAt).getTime() + gracePeriodMs <= now.getTime();
+                            
+                            if (gracePeriodElapsed) {
+                              // Cancel the run
+                              logger.info(`stuck_detection: Auto-cancelling run=${run.id} after grace period`);
+                              
+                              const cancelledRun = await cancelRunInternal(run.id, `Auto-cancelled due to critical stuck score (${score}/10) after grace period`);
+                              
+                              if (cancelledRun) {
+                                // Post cancellation notification
+                                await issuesSvc.addComment(runDetails.issueId, `🔴 **Run Auto-Cancelled**
+
+This run has been automatically cancelled due to critical stuck score.
+
+**Score:** ${score}/10
+**Grace Period:** ${gracePeriodMinutes} minutes
+**Cancelled At:** ${now.toISOString()}
+**Reason:** ${reason.join(', ')}
+
+**Recovery Options:**
+1. **Retry:** A retry task has been scheduled (see linked task)
+2. **Reassign:** Reassign the parent issue to another agent
+3. **Resume:** Contact admin to restore if cancellation was in error
+
+**Next Steps:**
+- Review the cancelled run transcript
+- Identify root cause
+- Create follow-up task if needed`, {
+                                  runId: run.id,
+                                });
+                                
+                                // Create recovery/retry task
+                                const retryTask = await issuesSvc.create(run.companyId, {
+                                  title: `[RECOVERY] Retry cancelled stuck run for ${agent?.name || run.agentId}`,
+                                  description: `## Recovery Task
+
+A heartbeat run was auto-cancelled due to being stuck. This task tracks the recovery/retry process.
+
+**Cancelled Run:** ${run.id}
+**Agent:** ${agent?.name || run.agentId}
+**Original Issue:** [Link](/BOB/issues/${runDetails.issueId})
+**Score:** ${score}/10
+**Reason:** ${reason.join(', ')}
+
+**Recovery Status:** Pending
+**Retry Count:** ${(run.stuckRetryCount ?? 0) + 1}/3
+
+**Actions Needed:**
+1. Review why the run got stuck
+2. Determine if the issue can be retried
+3. Update the parent issue with findings
+4. Reassign to appropriate agent if needed
+
+**Auto-Created:** ${now.toISOString()}`,
+                                  status: "todo",
+                                  priority: "high",
+                                  parentId: runDetails.issueId,
+                                });
+                                
+                                logger.info(`stuck_detection: Created recovery task for cancelled run=${run.id} task=${retryTask.id}`);
+                                
+                                // Update the cancelled run with retry info
+                                await db
+                                  .update(heartbeatRuns)
+                                  .set({
+                                    stuckRetryOfRunId: retryTask.id,
+                                    stuckRecoveryStatus: "retry_pending",
+                                    stuckCancelledAt: now,
+                                    stuckCancelledBy: "auto_escalation",
+                                    stuckCancelReason: `Critical stuck score: ${score}/10`,
+                                    stuckCancellationNotifiedAt: now,
+                                    updatedAt: now,
+                                  })
+                                  .where(eq(heartbeatRuns.id, cancelledRun.id));
+                              }
+                            } else {
+                              logger.info(`stuck_detection: Grace period still active for run=${run.id}`);
+                            }
+                          }
+                        } catch (err) {
+                          logger.error({ err, runId: run.id }, "stuck_detection: Failed to auto-cancel run");
+                        }
+                      }
+                    } else {
+                      // Circuit breaker blocked escalation
+                      await db
+                        .update(heartbeatRuns)
+                        .set({
+                          stuckCircuitBreakerTriggered: true,
+                          stuckCircuitBreakerReason: circuitCheck.reason,
+                          updatedAt: now,
+                        })
+                        .where(eq(heartbeatRuns.id, run.id));
+                      
+                      logger.info(`stuck_detection: Circuit breaker blocked escalation for run=${run.id} reason=${circuitCheck.reason}`);
+                    }
+                  }
+                } else {
+                  logger.info(`stuck_detection: Warning dismissed by user for run=${run.id}`);
+                }
+              }
+            } catch (err) {
+              logger.error({ err, runId: run.id }, "stuck_detection: Failed to post warning comment");
+            }
+          }
+        }
+
+        if (!dryRun && (status !== "none" || !run.lastStuckCheckAt || warningCommentPosted)) {
           updatePromises.push(
             db
               .update(heartbeatRuns)
@@ -7900,6 +8252,7 @@ export function heartbeatService(db: Db) {
                 stuckStatus: status,
                 lastStuckCheckAt: now,
                 stuckCheckCount: (run.stuckCheckCount ?? 0) + 1,
+                stuckWarningCommentPostedAt: warningCommentPosted ? now : run.stuckWarningCommentPostedAt,
                 updatedAt: now,
               })
               .where(eq(heartbeatRuns.id, run.id)),
