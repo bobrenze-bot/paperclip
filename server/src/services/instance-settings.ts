@@ -41,12 +41,14 @@ function normalizeExperimentalSettings(raw: unknown): InstanceExperimentalSettin
       enableEnvironments: parsed.data.enableEnvironments ?? false,
       enableIsolatedWorkspaces: parsed.data.enableIsolatedWorkspaces ?? false,
       autoRestartDevServerWhenIdle: parsed.data.autoRestartDevServerWhenIdle ?? false,
+      stuckDetection: parsed.data.stuckDetection ?? false,
     };
   }
   return {
     enableEnvironments: false,
     enableIsolatedWorkspaces: false,
     autoRestartDevServerWhenIdle: false,
+    stuckDetection: false,
   };
 }
 

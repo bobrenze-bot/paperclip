@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { agents, companies, createDb, heartbeatRuns } from "@paperclipai/db";
+import { agents, companies, createDb, heartbeatRuns, issues } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -47,6 +47,7 @@ describeEmbeddedPostgres("dashboard service", () => {
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(issues);
     await db.delete(heartbeatRuns);
     await db.delete(agents);
     await db.delete(companies);
@@ -165,5 +166,106 @@ describeEmbeddedPostgres("dashboard service", () => {
       other: 1,
       total: 3,
     });
+  });
+
+  it("returns queue health with blockedRatio and refillRisk", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "running",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values([
+      { id: randomUUID(), companyId, title: "Todo task 1", status: "todo" },
+      { id: randomUUID(), companyId, title: "Todo task 2", status: "todo" },
+      { id: randomUUID(), companyId, title: "In progress task", status: "in_progress" },
+      { id: randomUUID(), companyId, title: "In review task", status: "in_review" },
+      { id: randomUUID(), companyId, title: "Blocked task 1", status: "blocked" },
+      { id: randomUUID(), companyId, title: "Blocked task 2", status: "blocked" },
+      { id: randomUUID(), companyId, title: "Backlog task", status: "backlog" },
+    ]);
+
+    const queueHealth = await dashboardService(db).queueHealth(companyId);
+
+    expect(queueHealth).toMatchObject({
+      companyId,
+      queue: {
+        actionable: 4,
+        blocked: 2,
+        backlog: 1,
+        total: 7,
+      },
+      refillRisk: {
+        status: "monitor",
+        threshold: 10,
+        current: 4,
+        blockedRatio: 2 / 7,
+        suppressed: true,
+      },
+    });
+
+    expect(queueHealth.refillRisk.message).toMatch(/WARNING.*blocked/);
+    expect(queueHealth.refillRisk.message).toMatch(/45% of work blocked/);
+  });
+
+  it("returns normal status when blocked ratio is low", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "running",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values([
+      { id: randomUUID(), companyId, title: "Todo task 1", status: "todo" },
+      { id: randomUUID(), companyId, title: "Todo task 2", status: "todo" },
+      { id: randomUUID(), companyId, title: "In progress task", status: "in_progress" },
+      { id: randomUUID(), companyId, title: "In review task", status: "in_review" },
+      { id: randomUUID(), companyId, title: "Backlog task", status: "backlog" },
+    ]);
+
+    const queueHealth = await dashboardService(db).queueHealth(companyId);
+
+    expect(queueHealth.refillRisk.suppressed).toBe(false);
+    expect(queueHealth.refillRisk.status).toBe("normal");
+    expect(queueHealth.refillRisk.message).not.toMatch(/WARNING/);
+  });
+
+  it("throws not found for invalid company", async () => {
+    const { dashboardService } = await import("../services/dashboard.js");
+    const randomId = randomUUID();
+
+    await expect(dashboardService(db).queueHealth(randomId)).rejects.toThrow("Company not found");
   });
 });

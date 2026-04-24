@@ -5,6 +5,7 @@ import { notFound } from "../errors.js";
 import { budgetService } from "./budgets.js";
 
 const DASHBOARD_RUN_ACTIVITY_DAYS = 14;
+const REFILL_THRESHOLD = 10;
 
 function formatUtcDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -156,6 +157,87 @@ export function dashboardService(db: Db) {
           pausedProjects: budgetOverview.pausedProjectCount,
         },
         runActivity: Array.from(runActivity.values()),
+      };
+    },
+    queueHealth: async (companyId: string) => {
+      const company = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, companyId))
+        .then((rows) => rows[0] ?? null);
+
+      if (!company) throw notFound("Company not found");
+
+      const taskRows = await db
+        .select({ status: issues.status, count: sql<number>`count(*)` })
+        .from(issues)
+        .where(eq(issues.companyId, companyId))
+        .groupBy(issues.status);
+
+      const taskCounts: Record<string, number> = {
+        todo: 0,
+        inProgress: 0,
+        inReview: 0,
+        blocked: 0,
+        backlog: 0,
+      };
+
+      for (const row of taskRows) {
+        const count = Number(row.count);
+        if (row.status === "todo") taskCounts.todo += count;
+        if (row.status === "in_progress") taskCounts.inProgress += count;
+        if (row.status === "in_review") taskCounts.inReview += count;
+        if (row.status === "blocked") taskCounts.blocked += count;
+        if (row.status === "backlog") taskCounts.backlog += count;
+      }
+
+      const actionable = taskCounts.todo + taskCounts.inProgress + taskCounts.inReview;
+      const blocked = taskCounts.blocked;
+      const backlog = taskCounts.backlog;
+      const total = actionable + blocked + backlog;
+
+      const blockedRatio = total > 0 ? blocked / total : 0;
+
+      const refillStatus =
+        blockedRatio > 0.4
+          ? "warning"
+          : blockedRatio > 0.3
+          ? "monitor"
+          : blockedRatio > 0.2
+          ? "critical"
+          : "normal";
+
+      const suppressed = blockedRatio > 0.3 && actionable >= 5;
+      const suppressionReason = blockedRatio > 0.4 ? "high" : "elevated";
+
+      const ratio = actionable > 0 ? actionable / REFILL_THRESHOLD : 0;
+      const status = ratio > 1 ? "normal" : refillStatus;
+
+      const message = suppressed
+        ? `WARNING: Queue getting low (${actionable} tasks). Refill suppressed: ${Math.round(
+            blockedRatio * 100,
+          )}% of work blocked. Resolve blockers before refilling.`
+        : `Queue has ${actionable} actionable tasks. Blocked ratio: ${Math.round(
+            blockedRatio * 100,
+          )}%.`;
+
+      return {
+        companyId,
+        queue: {
+          actionable,
+          blocked,
+          backlog,
+          total,
+        },
+        refillRisk: {
+          status,
+          threshold: REFILL_THRESHOLD,
+          current: actionable,
+          ratio,
+          blockedRatio,
+          suppressed,
+          message,
+        },
       };
     },
   };
