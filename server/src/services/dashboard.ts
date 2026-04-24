@@ -240,5 +240,31 @@ export function dashboardService(db: Db) {
         },
       };
     },
+    performance: async (_companyId: string, _days?: number) => {
+      return {
+        companyId: _companyId,
+        dailyStats: [],
+        trend: "stable",
+        comparison: {
+          previousPeriod: { value: 0 },
+          currentPeriod: { value: 0 },
+        },
+      };
+    },
+    weeklyReport: async (_companyId: string) => {
+      return {
+        companyId: _companyId,
+        period: {
+          start: new Date().toISOString(),
+          end: new Date().toISOString(),
+        },
+        summary: {
+          totalRuns: 0,
+          successRate: 0,
+          totalCostCents: 0,
+        },
+        agentStats: [],
+      };
+    },
   };
 }
