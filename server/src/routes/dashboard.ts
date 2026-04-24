@@ -52,5 +52,12 @@ export function dashboardRoutes(db: Db) {
     res.json(metrics);
   });
 
+  router.get("/companies/:companyId/dashboard/unified-refill-health", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const health = await svc.unifiedRefillHealth(companyId);
+    res.json(health);
+  });
+
   return router;
 }
