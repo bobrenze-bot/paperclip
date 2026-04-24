@@ -75,6 +75,10 @@ print('SKIP' if age_hours < 4 else 'PROCEED')
 
 ## Blockers
 [What needs human attention]
+
+## FUTP Compliance
+[Tasks marked done since last synthesis that listed "next steps" — verify child tasks exist in Paperclip.
+Flag any where prose says "next steps" but no child task IDs appear in the completion comment.]
 ```
 
 ## Active Projects

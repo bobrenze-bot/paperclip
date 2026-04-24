@@ -50,6 +50,10 @@ export const heartbeatRuns = pgTable(
     lastUsefulActionAt: timestamp("last_useful_action_at", { withTimezone: true }),
     nextAction: text("next_action"),
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
+    stuckScore: integer("stuck_score"),
+    stuckStatus: text("stuck_status"),
+    lastStuckCheckAt: timestamp("last_stuck_check_at", { withTimezone: true }),
+    stuckCheckCount: integer("stuck_check_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -63,6 +67,11 @@ export const heartbeatRuns = pgTable(
       table.companyId,
       table.livenessState,
       table.createdAt,
+    ),
+    companyStuckIdx: index("heartbeat_runs_company_stuck_idx").on(
+      table.companyId,
+      table.stuckStatus,
+      table.lastStuckCheckAt,
     ),
   }),
 );

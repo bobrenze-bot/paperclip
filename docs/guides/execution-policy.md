@@ -204,6 +204,8 @@ POST /api/companies/{companyId}/issues
 }
 ```
 
+> **Bulk operations:** For creating 5+ issues with execution policies, use the company import workflow (`/api/companies/{id}/imports/apply`) instead of individual issue creation. See [IMPORT-PACKAGE-WORKFLOW.md](/shared/IMPORT-PACKAGE-WORKFLOW.md) for CEO-safe bulk loading.
+
 Stage IDs and participant IDs are auto-generated if omitted. Duplicate participants within a stage are automatically deduplicated. Stages with no valid participants are removed. If no valid stages remain, the policy is set to `null`.
 
 ### Updating execution policy on an existing issue

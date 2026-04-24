@@ -1692,7 +1692,7 @@ export function buildInviteOnboardingTextDocument(
         adapterType: "openclaw_gateway",
         capabilities: "OpenClaw agent adapter",
         agentDefaultsPayload: {
-          url: "ws://127.0.0.1:18789",
+          url: process.env.OPENCLAW_GATEWAY_URL ?? "ws://127.0.0.1:18800",
           paperclipApiUrl: "http://host.docker.internal:3100",
           headers: { "x-openclaw-token": token },
           waitTimeoutMs: 120000,

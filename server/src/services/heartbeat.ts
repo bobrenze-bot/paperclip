@@ -627,11 +627,15 @@ const heartbeatRunListColumns = {
   livenessState: heartbeatRuns.livenessState,
   livenessReason: heartbeatRuns.livenessReason,
   continuationAttempt: heartbeatRuns.continuationAttempt,
-  lastUsefulActionAt: heartbeatRuns.lastUsefulActionAt,
-  nextAction: heartbeatRuns.nextAction,
-  createdAt: heartbeatRuns.createdAt,
-  updatedAt: heartbeatRuns.updatedAt,
-} as const;
+    lastUsefulActionAt: heartbeatRuns.lastUsefulActionAt,
+    nextAction: heartbeatRuns.nextAction,
+    stuckScore: heartbeatRuns.stuckScore,
+    stuckStatus: heartbeatRuns.stuckStatus,
+    lastStuckCheckAt: heartbeatRuns.lastStuckCheckAt,
+    stuckCheckCount: heartbeatRuns.stuckCheckCount,
+    createdAt: heartbeatRuns.createdAt,
+    updatedAt: heartbeatRuns.updatedAt,
+  } as const;
 
 const heartbeatRunListContextColumns = {
   contextIssueId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`.as("contextIssueId"),
@@ -736,6 +740,10 @@ const heartbeatRunIssueSummaryColumns = {
   continuationAttempt: heartbeatRuns.continuationAttempt,
   lastUsefulActionAt: heartbeatRuns.lastUsefulActionAt,
   nextAction: heartbeatRuns.nextAction,
+  stuckScore: heartbeatRuns.stuckScore,
+  stuckStatus: heartbeatRuns.stuckStatus,
+  lastStuckCheckAt: heartbeatRuns.lastStuckCheckAt,
+  stuckCheckCount: heartbeatRuns.stuckCheckCount,
   issueId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`.as("issueId"),
 } as const;
 
@@ -7793,5 +7801,142 @@ export function heartbeatService(db: Db) {
         .limit(1);
       return run ?? null;
     },
+
+    detectStuckRuns: async (dryRun = true) => {
+      const instanceSettings = instanceSettingsService(db);
+      const config = await instanceSettings.getExperimental();
+      if (!config.stuckDetection && dryRun) {
+        logger.info("stuck_detection: Service disabled in experimental settings");
+        return { detected: 0, dryRun, skipped: true };
+      }
+
+      const now = new Date();
+      const fifteenMinutesAgo = new Date(now.getTime() - 15 * 60 * 1000);
+      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+      const activeRuns = await db
+        .select({
+          id: heartbeatRuns.id,
+          agentId: heartbeatRuns.agentId,
+          status: heartbeatRuns.status,
+          startedAt: heartbeatRuns.startedAt,
+          lastStuckCheckAt: heartbeatRuns.lastStuckCheckAt,
+          stuckScore: heartbeatRuns.stuckScore,
+          stuckStatus: heartbeatRuns.stuckStatus,
+          stuckCheckCount: heartbeatRuns.stuckCheckCount,
+          nextAction: heartbeatRuns.nextAction,
+          livenessState: heartbeatRuns.livenessState,
+          livenessReason: heartbeatRuns.livenessReason,
+          contextSnapshot: heartbeatRuns.contextSnapshot,
+          createdAt: heartbeatRuns.createdAt,
+        })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.status, "running"),
+            lte(heartbeatRuns.startedAt ?? now, fifteenMinutesAgo),
+          ),
+        )
+        .orderBy(desc(heartbeatRuns.startedAt));
+
+      if (activeRuns.length === 0) {
+        logger.info("stuck_detection: No active runs to check");
+        return { detected: 0, dryRun, totalChecked: 0 };
+      }
+
+      let detectedCount = 0;
+      const updatePromises = [];
+
+      for (const run of activeRuns) {
+        const lastCheck = run.lastStuckCheckAt;
+        const shouldCheck = !lastCheck || lastCheck < fifteenMinutesAgo;
+
+        if (!shouldCheck && run.stuckStatus) {
+          continue;
+        }
+
+        let score = 0;
+        let status: "none" | "warning" | "critical" = "none";
+        let reason: string[] = [];
+
+        const hoursRunning = lastCheck ? 24 : Math.max(1, Math.round((now.getTime() - new Date(run.startedAt!).getTime()) / (1000 * 60 * 60)));
+
+        if (run.livenessState === "empty_response" || run.livenessState === "plan_only") {
+          score += hoursRunning * 2;
+          reason.push(`liveness=${run.livenessState} (${hoursRunning}h)`);
+        }
+
+        if (!run.livenessState) {
+          score += hoursRunning * 3;
+          reason.push("no_liveness_check");
+        }
+
+        if (run.stuckCheckCount && run.stuckCheckCount >= 4) {
+          score += 5;
+          reason.push("check_count_exceeded");
+        }
+
+        const agent = await getAgent(run.agentId);
+        if (agent?.status === "paused" || agent?.status === "terminated") {
+          score += 10;
+          reason.push("agent_status=" + agent!.status);
+        }
+
+        if (score >= 10) {
+          status = "critical";
+          detectedCount++;
+        } else if (score >= 5) {
+          status = "warning";
+        }
+
+        logger.info(`stuck_detection: run=${run.id} score=${score} status=${status} reason=${reason.join(", ")}`);
+
+        if (!dryRun && (status !== "none" || !run.lastStuckCheckAt)) {
+          updatePromises.push(
+            db
+              .update(heartbeatRuns)
+              .set({
+                stuckScore: score,
+                stuckStatus: status,
+                lastStuckCheckAt: now,
+                stuckCheckCount: (run.stuckCheckCount ?? 0) + 1,
+                updatedAt: now,
+              })
+              .where(eq(heartbeatRuns.id, run.id)),
+          );
+        }
+      }
+
+      if (updatePromises.length > 0) {
+        await Promise.all(updatePromises);
+      }
+
+      return {
+        detected: detectedCount,
+        dryRun,
+        totalChecked: activeRuns.length,
+        updates: updatePromises.length,
+      };
+    },
+  };
+}
+
+export async function heartbeatStuckDetectionScheduler(db: Db, now: Date = new Date()) {
+  const heartbeatRunsSvc = heartbeatService(db);
+  
+  const instanceSettings = instanceSettingsService(db);
+  const config = await instanceSettings.getExperimental();
+  
+  if (!config.stuckDetection) {
+    logger.info("stuck_detection: Service disabled in experimental settings");
+    return { skipped: true };
+  }
+  
+  const result = await heartbeatRunsSvc.detectStuckRuns(false);
+  
+  return {
+    ...result,
+    skipped: false,
+    checkedAt: now.toISOString(),
   };
 }

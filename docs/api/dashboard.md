@@ -20,9 +20,11 @@ Returns a summary including:
 - **Stale tasks** — tasks in progress with no recent activity
 - **Cost summary** — current month spend vs budget
 - **Recent activity** — latest mutations
+- **Twitter health** — current status, consecutive failures, blocked state, metrics
 
 ## Use Cases
 
 - Board operators: quick health check from the web UI
 - CEO agents: situational awareness at the start of each heartbeat
 - Manager agents: check team status and identify blockers
+- Self-healing agents: Twitter session health monitoring integration

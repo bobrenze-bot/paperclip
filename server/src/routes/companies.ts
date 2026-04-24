@@ -173,6 +173,49 @@ export function companyRoutes(db: Db, storage?: StorageService) {
     assertBoard(req);
     assertImportTargetAccess(req, req.body.target);
     const preview = await portability.previewImport(req.body);
+    const actor = getActorInfo(req);
+    const entityId = preview.targetCompanyId ?? "00000000-0000-0000-0000-000000000000";
+    const source = req.body.source;
+    const sourceType = source.type === "github" ? "github" : source.type === "inline" ? "bundle" : "local";
+    const sourceRef = source.type === "github" ? source.url : source.type === "inline" ? (source.rootPath ?? "bundle") : "local";
+    await logActivity(db, {
+      companyId: entityId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      action: "company.import_previewed",
+      entityType: "company",
+      entityId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      details: {
+        sourceType,
+        sourceRef,
+        targetMode: req.body.target.mode,
+        targetCompanyId: preview.targetCompanyId,
+        targetCompanyName: preview.targetCompanyName,
+        companyAction: preview.plan.companyAction,
+        include: {
+          company: preview.include.company,
+          agents: preview.include.agents,
+          projects: preview.include.projects,
+          skills: preview.include.skills,
+        },
+        agentCount: preview.plan.agentPlans.length,
+        agentsPlanned: preview.plan.agentPlans.filter((p) => p.action === "create").length,
+        agentsUpdatePlanned: preview.plan.agentPlans.filter((p) => p.action === "update").length,
+        agentsSkipPlanned: preview.plan.agentPlans.filter((p) => p.action === "skip").length,
+        projectCount: preview.plan.projectPlans.length,
+        projectsPlanned: preview.plan.projectPlans.filter((p) => p.action === "create").length,
+        projectsUpdatePlanned: preview.plan.projectPlans.filter((p) => p.action === "update").length,
+        projectsSkipPlanned: preview.plan.projectPlans.filter((p) => p.action === "skip").length,
+        warningCount: preview.warnings.length,
+        warnings: preview.warnings.slice(0, 10),
+        warningsTruncated: preview.warnings.length > 10,
+        errorCount: preview.errors.length,
+        errors: preview.errors,
+        routeType: "board_full",
+      },
+    });
     res.json(preview);
   });
 
@@ -226,6 +269,49 @@ export function companyRoutes(db: Db, storage?: StorageService) {
     const preview = await portability.previewImport(req.body, {
       mode: "agent_safe",
       sourceCompanyId: companyId,
+    });
+    const actor = getActorInfo(req);
+    const entityId = preview.targetCompanyId ?? companyId;
+    const source = req.body.source;
+    const sourceType = source.type === "github" ? "github" : source.type === "inline" ? "bundle" : "local";
+    const sourceRef = source.type === "github" ? source.url : source.type === "inline" ? (source.rootPath ?? "bundle") : "local";
+    await logActivity(db, {
+      companyId: entityId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      action: "company.import_previewed",
+      entityType: "company",
+      entityId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      details: {
+        sourceType,
+        sourceRef,
+        targetMode: req.body.target.mode,
+        targetCompanyId: preview.targetCompanyId,
+        targetCompanyName: preview.targetCompanyName,
+        companyAction: preview.plan.companyAction,
+        include: {
+          company: preview.include.company,
+          agents: preview.include.agents,
+          projects: preview.include.projects,
+          skills: preview.include.skills,
+        },
+        agentCount: preview.plan.agentPlans.length,
+        agentsPlanned: preview.plan.agentPlans.filter((p) => p.action === "create").length,
+        agentsUpdatePlanned: preview.plan.agentPlans.filter((p) => p.action === "update").length,
+        agentsSkipPlanned: preview.plan.agentPlans.filter((p) => p.action === "skip").length,
+        projectCount: preview.plan.projectPlans.length,
+        projectsPlanned: preview.plan.projectPlans.filter((p) => p.action === "create").length,
+        projectsUpdatePlanned: preview.plan.projectPlans.filter((p) => p.action === "update").length,
+        projectsSkipPlanned: preview.plan.projectPlans.filter((p) => p.action === "skip").length,
+        warningCount: preview.warnings.length,
+        warnings: preview.warnings.slice(0, 10),
+        warningsTruncated: preview.warnings.length > 10,
+        errorCount: preview.errors.length,
+        errors: preview.errors,
+        routeType: "agent_safe",
+      },
     });
     res.json(preview);
   });

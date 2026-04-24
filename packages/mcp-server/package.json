@@ -13,20 +13,37 @@
   },
   "type": "module",
   "bin": {
-    "paperclip-mcp-server": "./dist/stdio.js"
+    "paperclip-mcp-server": "./dist/stdio.js",
+    "paperclip-mcp-http": "./dist/http-start.js"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./http": "./src/http.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/http.js",
+    "start:stdio": "node dist/stdio.js",
+    "dev": "tsx src/http.ts",
+    "dev:stdio": "tsx src/stdio.ts"
   },
   "publishConfig": {
     "access": "public",
     "bin": {
-      "paperclip-mcp-server": "./dist/stdio.js"
+      "paperclip-mcp-server": "./dist/stdio.js",
+      "paperclip-mcp-http": "./dist/http-start.js"
     },
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./http": {
+        "types": "./dist/http.d.ts",
+        "import": "./dist/http.js"
       }
     },
     "main": "./dist/index.js",
@@ -34,20 +51,20 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "DEPLOYMENT.md",
+    "MARKETPLACE.md"
   ],
-  "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
-  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@paperclipai/shared": "workspace:*",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
     "@types/node": "^24.6.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",

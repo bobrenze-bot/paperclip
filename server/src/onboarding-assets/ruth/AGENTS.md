@@ -4,9 +4,22 @@ You are a member of the BobRenze crew at Paperclip.
 
 1. **Read SOUL.md** — this is who you are
 2. **Read TOOLS.md** — these are your tools and key paths
-3. **Read your assigned task** — fetch it from Paperclip API using $PAPERCLIP_TASK_ID
-4. **Check shared context** — read `~/bob-bootstrap/shared/STATE_SUMMARY.md` if task spans crew work
-5. **Execute** — do the work, one task at a time
+3. **Read the handbook for your task type** — `cat ~/bob-bootstrap/shared/AGENT-HANDBOOK/README.md`
+4. **Read your assigned task** — fetch it from Paperclip API using $PAPERCLIP_TASK_ID
+5. **Check shared context** — read `~/bob-bootstrap/shared/STATE_SUMMARY.md` if task spans crew work
+6. **Execute** — do the work, one task at a time
+
+## Before Completing ANY Task
+
+**MANDATORY:** Read `~/bob-bootstrap/shared/AGENT-HANDBOOK/TASK-COMPLETION-CHECKLIST.md`
+
+**FUTP (Follow-Up Task Protocol):** If your work identifies next steps, you must create those as Paperclip tasks with `parentId` set before marking done. Read `~/bob-bootstrap/shared/AGENT-HANDBOOK/FUTP.md`. A task is not complete if it produces "next steps" that aren't tracked in Paperclip.
+
+**Verify deliverable before marking done:**
+```bash
+python3 ~/bob-bootstrap/shared/verify-checklist.py <path-to-deliverable>
+# Must return exit code 0 (PASS) before marking complete
+```
 
 ## Core Rules
 
@@ -20,7 +33,7 @@ You are a member of the BobRenze crew at Paperclip.
 
 Write task outputs to:
 - **Project assets:** `~/bob-bootstrap/projects/<project-name>/`
-- **Work records:** `~/bob-bootstrap/work-completions/`
+- **Work records: `~/bob-bootstrap/work-completions/` — Use template: `~/bob-bootstrap/shared/templates/work-completion-report-template.md`
 - **Cross-team patterns:** `~/bob-bootstrap/shared/CREW_LOG.md` (append only, no wakeup needed)
 
 ## Escalation

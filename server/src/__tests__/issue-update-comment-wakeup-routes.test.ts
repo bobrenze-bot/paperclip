@@ -12,6 +12,7 @@ const mockIssueService = vi.hoisted(() => ({
   getRelationSummaries: vi.fn(),
   listWakeableBlockedDependents: vi.fn(),
   getWakeableParentAfterChildCompletion: vi.fn(),
+  assertCheckoutOwner: vi.fn(async () => ({ adoptedFromRunId: null })),
 }));
 
 const mockHeartbeatService = vi.hoisted(() => ({
@@ -136,7 +137,17 @@ function registerModuleMocks() {
   }));
 }
 
-async function createApp() {
+async function createApp(
+  actor: Record<string, unknown> = {
+    type: "board",
+    userId: "local-board",
+    companyIds: ["company-1"],
+    source: "local_implicit",
+    isInstanceAdmin: false,
+    actorType: "user",
+    actorId: "local-board",
+  },
+) {
   const [{ errorHandler }, { issueRoutes }] = await Promise.all([
     vi.importActual<typeof import("../middleware/index.js")>("../middleware/index.js"),
     vi.importActual<typeof import("../routes/issues.js")>("../routes/issues.js"),
@@ -144,13 +155,7 @@ async function createApp() {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).actor = {
-      type: "board",
-      userId: "local-board",
-      companyIds: ["company-1"],
-      source: "local_implicit",
-      isInstanceAdmin: false,
-    };
+    (req as any).actor = actor;
     next();
   });
   app.use("/api", issueRoutes({} as any, {} as any));
@@ -284,4 +289,87 @@ describe("issue update comment wakeups", () => {
       }),
     );
   });
+
+  it("does not wake the assignee for self-authored closure comments on comment-only updates", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "in_progress",
+    });
+    const updated = makeIssue({
+      ...existing,
+      status: "done",
+      completedAt: new Date("2026-04-21T09:23:00.000Z"),
+    });
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-3",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "Closed with the requested fix.",
+      createdByRunId: "run-1",
+    });
+
+    const res = await request(
+      await createApp({
+        type: "agent",
+        agentId: ASSIGNEE_AGENT_ID,
+        companyId: "company-1",
+        companyIds: ["company-1"],
+        source: "agent_token",
+        isInstanceAdmin: false,
+        actorType: "agent",
+        actorId: ASSIGNEE_AGENT_ID,
+        runId: "run-1",
+      }),
+    )
+      .patch(`/api/issues/${existing.id}`)
+      .send({
+        status: "done",
+        comment: "Closed with the requested fix.",
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("does not wake the assignee for same-run board comments on comment-only updates", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "in_progress",
+    });
+    const updated = { ...existing };
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-4",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "Administrative cleanup note.",
+      createdByRunId: "run-2",
+    });
+
+    const res = await request(
+      await createApp({
+        type: "board",
+        userId: "local-board",
+        companyIds: ["company-1"],
+        source: "local_implicit",
+        isInstanceAdmin: false,
+        actorType: "user",
+        actorId: "local-board",
+        runId: "run-2",
+      }),
+    )
+      .patch(`/api/issues/${existing.id}`)
+      .send({
+        comment: "Administrative cleanup note.",
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
 });

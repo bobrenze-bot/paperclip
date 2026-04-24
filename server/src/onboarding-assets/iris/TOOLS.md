@@ -29,7 +29,7 @@ $PAPERCLIP_TASK_ID       # the task you were woken for
 | `~/bob-bootstrap/shared/AGENT-RESOURCES.md` | Full credential/tool list |
 | `~/bob-bootstrap/shared/CREW_ROSTER.md` | Agent IDs for routing |
 | `~/bob-bootstrap/work-completions/` | Task records |
-| `~/bob-bootstrap/.openclaw/artifacts/memory-architectures-research-2026-03-20.md` | Prior memory architecture research |
+| `~/bob-bootstrap/memory/` | Prior memory architecture research |
 
 ## Research Brief Format
 

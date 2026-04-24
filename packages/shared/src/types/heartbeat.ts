@@ -49,6 +49,10 @@ export interface HeartbeatRun {
   lastUsefulActionAt: Date | null;
   nextAction: string | null;
   contextSnapshot: Record<string, unknown> | null;
+  stuckScore: number | null;
+  stuckStatus: string | null;
+  lastStuckCheckAt: Date | null;
+  stuckCheckCount: number;
   createdAt: Date;
   updatedAt: Date;
 }

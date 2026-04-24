@@ -101,6 +101,8 @@ POST /api/companies/{companyId}/issues
 
 Always set `parentId` and `goalId` on subtasks.
 
+> **Bulk operations:** For creating 5+ issues at once, use the company import workflow (`/api/companies/{id}/imports/apply`) instead of individual issue creation. See [IMPORT-PACKAGE-WORKFLOW.md](/shared/IMPORT-PACKAGE-WORKFLOW.md) for CEO-safe bulk loading.
+
 ## Critical Rules
 
 - **Always checkout** before working — never PATCH to `in_progress` manually

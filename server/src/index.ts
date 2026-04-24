@@ -31,6 +31,7 @@ import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
 import {
   feedbackService,
   heartbeatService,
+  heartbeatStuckDetectionScheduler,
   instanceSettingsService,
   reconcilePersistedRuntimeServicesOnStartup,
   routineService,
@@ -710,6 +711,27 @@ export async function startServer(): Promise<StartedServer> {
         .catch((err) => {
           logger.error({ err }, "routine scheduler tick failed");
         });
+
+      if (!config.stuckDetectionEnabled) {
+        logger.info("stuck_detection: Shadow mode disabled in config. Enable with STUCK_DETECTION_ENABLED=true");
+      } else {
+        void heartbeatStuckDetectionScheduler(db as any, new Date())
+          .then((result: { skipped?: boolean; detected?: number }) => {
+            if (!result.skipped) {
+              if (result.detected && result.detected > 0) {
+                logger.info(
+                  { ...result },
+                  `stuck_detection: Shadow mode detected ${result.detected} stuck run(s) in dry-run mode`,
+                );
+              } else {
+                logger.debug({ ...result }, "stuck_detection: Shadow mode completed - no stuck runs detected");
+              }
+            }
+          })
+          .catch((err: Error) => {
+            logger.error({ err }, "stuck_detection scheduler failed");
+          });
+      }
   
       // Periodically reap orphaned runs (5-min staleness threshold) and make sure
       // persisted queued work is still being driven forward.

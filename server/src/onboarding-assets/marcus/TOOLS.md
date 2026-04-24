@@ -64,9 +64,26 @@ END_PYTHON
 | `~/bob-bootstrap/shared/AGENT-RESOURCES.md` | Full resource list |
 | `~/bob-bootstrap/shared/3-Gate-Protocol.md` | Quality workflow |
 
-## ⚠️ Assignment Authority Constraint (BOB-954)
+## Creating Subtasks (FUTP)
 
-You **cannot** create/self-assign tasks directly — the API returns 403.
-- **Routing**: PATCH existing task to reassign to specialist
-- **New tasks**: Escalate to Bob (5898c86d-...) for creation
-- This is expected behavior, not a bug
+You **can** create subtasks directly via the API. Use `POST /api/companies/{COMPANY_ID}/issues` with `parentId` set to link to the parent task.
+
+```python
+python3 << 'END_PYTHON'
+import urllib.request, json, os
+task_data = {
+    "title": "[PHASE] Action — Context",
+    "parentId": os.environ["PAPERCLIP_TASK_ID"],  # links to parent
+    "assigneeAgentId": "<agent-uuid>",
+    "projectId": "<project-uuid>",
+    "status": "todo",
+    "priority": "medium"
+}
+url = os.environ["PAPERCLIP_API_URL"] + "/api/companies/" + os.environ["PAPERCLIP_COMPANY_ID"] + "/issues"
+req = urllib.request.Request(url, json.dumps(task_data).encode(),
+    {"Authorization": "Bearer " + os.environ["PAPERCLIP_API_KEY"], "Content-Type": "application/json"},
+    method="POST")
+result = json.loads(urllib.request.urlopen(req).read())
+print("Created:", result["id"], result["identifier"])
+END_PYTHON
+```

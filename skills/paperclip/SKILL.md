@@ -128,6 +128,8 @@ Status values: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`,
 
 **Step 9 — Delegate if needed.** Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. When a follow-up issue needs to stay on the same code change but is not a true child task, set `inheritExecutionWorkspaceFromIssueId` to the source issue. Set `billingCode` for cross-team work.
 
+> **Bulk operations:** For creating 5+ issues at once, use the company import workflow (`/api/companies/{id}/imports/apply`) instead of individual issue creation. See [IMPORT-PACKAGE-WORKFLOW.md](/shared/IMPORT-PACKAGE-WORKFLOW.md) for CEO-safe bulk loading.
+
 ## Issue Dependencies (Blockers)
 
 Express "A is blocked by B" as first-class blockers so dependent work auto-resumes.
