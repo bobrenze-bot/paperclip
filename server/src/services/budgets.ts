@@ -31,7 +31,9 @@ type ScopeRecord = {
   pauseReason: "manual" | "budget" | "system" | null;
 };
 
-type PolicyRow = typeof budgetPolicies.$inferSelect;
+type PolicyRow = typeof budgetPolicies.$inferSelect & {
+  autoResumeOnBudgetIncrease: boolean;
+};
 type IncidentRow = typeof budgetIncidents.$inferSelect;
 
 export type BudgetEnforcementScope = {
@@ -532,6 +534,8 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
         .then((rows) => rows[0] ?? null);
 
       const now = new Date();
+      const oldAmount = existing?.amount ?? 0;
+      const autoResumeOnBudgetIncrease = input.autoResumeOnBudgetIncrease ?? existing?.autoResumeOnBudgetIncrease ?? false;
       const row = existing
         ? await db
           .update(budgetPolicies)
@@ -541,6 +545,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
             hardStopEnabled: input.hardStopEnabled ?? existing.hardStopEnabled,
             notifyEnabled: input.notifyEnabled ?? existing.notifyEnabled,
             isActive: nextIsActive,
+            autoResumeOnBudgetIncrease,
             updatedByUserId: actorUserId,
             updatedAt: now,
           })
@@ -560,6 +565,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
             hardStopEnabled: input.hardStopEnabled ?? true,
             notifyEnabled: input.notifyEnabled ?? true,
             isActive: nextIsActive,
+            autoResumeOnBudgetIncrease: input.autoResumeOnBudgetIncrease ?? false,
             createdByUserId: actorUserId,
             updatedByUserId: actorUserId,
           })
@@ -586,6 +592,7 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
           .where(eq(agents.id, input.scopeId));
       }
 
+      let budgetIncreased = false;
       if (amount > 0) {
         const observedAmount = await computeObservedAmount(db, row);
         if (observedAmount < amount) {
@@ -605,6 +612,28 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
       } else {
         await resumeScopeFromBudget(row);
         await resolveOpenIncidentsForPolicy(row.id, actorUserId ? "approved" : null, actorUserId);
+      }
+
+      if (autoResumeOnBudgetIncrease && oldAmount > 0 && amount > oldAmount) {
+        const scopeRecord = await resolveScopeRecord(db, input.scopeType, input.scopeId);
+        if (scopeRecord.paused && scopeRecord.pauseReason === "budget") {
+          await resumeScopeFromBudget(row);
+          budgetIncreased = true;
+          await logActivity(db, {
+            companyId,
+            actorType: "system",
+            actorId: "budget_service",
+            action: "budget.auto_resumed_on_increase",
+            entityType: "budget_policy",
+            entityId: row.id,
+            details: {
+              scopeType: input.scopeType,
+              scopeId: input.scopeId,
+              oldAmount,
+              newAmount: amount,
+            },
+          });
+        }
       }
 
       await logActivity(db, {
@@ -908,7 +937,29 @@ export function budgetService(db: Db, hooks: BudgetServiceHooks = {}) {
             .where(eq(agents.id, policy.scopeId));
         }
 
+        const oldAmount = policy.amount;
+        const budgetIncreased = nextAmount > oldAmount;
+        const autoResumeNeeded = budgetIncreased && policy.autoResumeOnBudgetIncrease;
+        
         await resumeScopeFromBudget(policy);
+        
+        if (autoResumeNeeded) {
+          await logActivity(db, {
+            companyId,
+            actorType: "user",
+            actorId: actorUserId,
+            action: "budget.auto_resumed_on_increase",
+            entityType: "budget_policy",
+            entityId: policy.id,
+            details: {
+              scopeType: policy.scopeType,
+              scopeId: policy.scopeId,
+              oldAmount,
+              newAmount: nextAmount,
+              action: "incident_resolution",
+            },
+          });
+        }
         await db
           .update(budgetIncidents)
           .set({

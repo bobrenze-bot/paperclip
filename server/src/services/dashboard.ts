@@ -3,9 +3,14 @@ import type { Db } from "@paperclipai/db";
 import { agents, agentWakeupRequests, approvals, companies, costEvents, heartbeatRuns, issues, routineCatchUpBreaches } from "@paperclipai/db";
 import { notFound } from "../errors.js";
 import { budgetService } from "./budgets.js";
+import { publishLiveEvent } from "./live-events.js";
 
 const DASHBOARD_RUN_ACTIVITY_DAYS = 14;
 const REFILL_THRESHOLD = 10;
+const REFILL_ALERT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
+// Rate limiter: Map<companyId, timestamp>
+const refillAlertCooldowns = new Map<string, number>();
 
 // Local type definitions for stuck run metrics
 interface StuckRunFlaggedRun {
@@ -278,6 +283,27 @@ export function dashboardService(db: Db) {
 
       const ratio = actionable > 0 ? actionable / REFILL_THRESHOLD : 0;
       const status = ratio > 1 ? "normal" : refillStatus;
+
+      // Emit warning alert when critical (only once per 30 min per company)
+      if (status === "critical") {
+        const nowMs = Date.now();
+        const lastAlert = refillAlertCooldowns.get(companyId) ?? 0;
+        if (nowMs - lastAlert >= REFILL_ALERT_COOLDOWN_MS) {
+          publishLiveEvent({
+            companyId,
+            type: "dashboard_refill_alert",
+            payload: {
+              status: "critical",
+              actionable,
+              threshold: REFILL_THRESHOLD,
+              ratio,
+              blockedRatio,
+              timestamp: new Date().toISOString(),
+            },
+          });
+          refillAlertCooldowns.set(companyId, nowMs);
+        }
+      }
 
       const message = suppressed
         ? `WARNING: Queue getting low (${actionable} tasks). Refill suppressed: ${Math.round(

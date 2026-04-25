@@ -20,6 +20,7 @@ export interface BudgetPolicy {
   hardStopEnabled: boolean;
   notifyEnabled: boolean;
   isActive: boolean;
+  autoResumeOnBudgetIncrease: boolean;
   createdByUserId: string | null;
   updatedByUserId: string | null;
   createdAt: Date;
@@ -90,6 +91,7 @@ export interface BudgetPolicyUpsertInput {
   hardStopEnabled?: boolean;
   notifyEnabled?: boolean;
   isActive?: boolean;
+  autoResumeOnBudgetIncrease?: boolean;
 }
 
 export interface BudgetIncidentResolutionInput {

@@ -15,6 +15,7 @@ export const budgetPolicies = pgTable(
     hardStopEnabled: boolean("hard_stop_enabled").notNull().default(true),
     notifyEnabled: boolean("notify_enabled").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
+    autoResumeOnBudgetIncrease: boolean("auto_resume_on_budget_increase").notNull().default(false),
     createdByUserId: text("created_by_user_id"),
     updatedByUserId: text("updated_by_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

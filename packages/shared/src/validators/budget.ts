@@ -16,6 +16,7 @@ export const upsertBudgetPolicySchema = z.object({
   hardStopEnabled: z.boolean().optional().default(true),
   notifyEnabled: z.boolean().optional().default(true),
   isActive: z.boolean().optional().default(true),
+  autoResumeOnBudgetIncrease: z.boolean().optional().default(false),
 });
 
 export type UpsertBudgetPolicy = z.infer<typeof upsertBudgetPolicySchema>;

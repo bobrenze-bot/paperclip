@@ -1,5 +1,5 @@
 {
-  "id": "e6e8e9f3-408f-4f8a-9c2d-1c9d5c7b4e1f",
+  "id": "9b5c8f0e-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
   "prevId": "116cf0a7-89d4-4164-aa33-a6ab3a326c06",
   "version": "7",
   "dialect": "postgresql",
@@ -27,56 +27,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "trigger_id": {
-          "name": "trigger_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "missed_count": {
-          "name": "missed_count",
-          "type": "integer",
+        "breach_time": {
+          "name": "breach_time",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
-        },
-        "cap_value": {
-          "name": "cap_value",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 25
-        },
-        "dropped_count": {
-          "name": "dropped_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "detected_at": {
-          "name": "detected_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "acknowledged_at": {
-          "name": "acknowledged_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "acknowledged_by_agent_id": {
-          "name": "acknowledged_by_agent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "acknowledged_by_user_id": {
-          "name": "acknowledged_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -85,65 +40,18 @@
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
+        "dropped_count": {
+          "name": "dropped_count",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false,
+          "default": 0
         }
       },
-      "indexes": {
-        "routine_catch_up_breaches_company_routine_idx": {
-          "name": "routine_catch_up_breaches_company_routine_idx",
-          "on": ["company_id", "routine_id", "detected_at"],
-          "type": "btree"
-        },
-        "routine_catch_up_breaches_routine_trigger_idx": {
-          "name": "routine_catch_up_breaches_routine_trigger_idx",
-          "on": ["routine_id", "trigger_id", "detected_at"],
-          "type": "btree"
-        },
-        "routine_catch_up_breaches_detected_at_idx": {
-          "name": "routine_catch_up_breaches_detected_at_idx",
-          "on": ["detected_at"],
-          "type": "btree"
-        }
-      },
-      "foreignKeys": {
-        "routine_catch_up_breaches_company_id_companies_id_fk": {
-          "name": "routine_catch_up_breaches_company_id_companies_id_fk",
-          "columns": ["company_id"],
-          "refTable": "companies",
-          "refColumns": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "routine_catch_up_breaches_routine_id_routines_id_fk": {
-          "name": "routine_catch_up_breaches_routine_id_routines_id_fk",
-          "columns": ["routine_id"],
-          "refTable": "routines",
-          "refColumns": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "routine_catch_up_breaches_trigger_id_routine_triggers_id_fk": {
-          "name": "routine_catch_up_breaches_trigger_id_routine_triggers_id_fk",
-          "columns": ["trigger_id"],
-          "refTable": "routine_triggers",
-          "refColumns": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "routine_catch_up_breaches_acknowledged_by_agent_id_agents_id_fk": {
-          "name": "routine_catch_up_breaches_acknowledged_by_agent_id_agents_id_fk",
-          "columns": ["acknowledged_by_agent_id"],
-          "refTable": "agents",
-          "refColumns": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      }
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
     }
   },
   "enums": {},
