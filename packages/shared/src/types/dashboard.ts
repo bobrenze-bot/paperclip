@@ -19,7 +19,9 @@ export interface DashboardSummary {
     inProgress: number;
     blocked: number;
     done: number;
+    cancelled: number;
   };
+  errorRate: number;
   costs: {
     monthSpendCents: number;
     monthBudgetCents: number;
@@ -36,7 +38,9 @@ export interface DashboardSummary {
   routineCatchUpBreaches?: {
     totalBreaches: number;
     totalMissedRuns: number;
+    totalDroppedRuns: number;
     maxMissedInSingleBreach: number;
+    maxDroppedInSingleBreach: number;
     acknowledgedCount: number;
     hasUnacknowledgedBreaches: boolean;
   };

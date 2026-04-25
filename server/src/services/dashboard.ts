@@ -67,6 +67,8 @@ function getRoutineCatchUpBreachesSummary(db: Db, companyId: string) {
         totalBreaches: Number(summary?.totalBreaches ?? 0),
         totalMissedRuns: Number(summary?.totalMissedRuns ?? 0),
         maxMissedInSingleBreach: Number(summary?.maxMissedInSingleBreach ?? 0),
+        totalDroppedRuns: 0,
+        maxDroppedInSingleBreach: 0,
         acknowledgedCount: Number(summary?.acknowledgedCount ?? 0),
         hasUnacknowledgedBreaches: (summary?.acknowledgedCount ?? 0) < (summary?.totalBreaches ?? 0),
       };
@@ -121,14 +123,26 @@ export function dashboardService(db: Db) {
         inProgress: 0,
         blocked: 0,
         done: 0,
+        cancelled: 0,
       };
       for (const row of taskRows) {
         const count = Number(row.count);
         if (row.status === "in_progress") taskCounts.inProgress += count;
         if (row.status === "blocked") taskCounts.blocked += count;
         if (row.status === "done") taskCounts.done += count;
+        if (row.status === "cancelled") taskCounts.cancelled += count;
         if (row.status !== "done" && row.status !== "cancelled") taskCounts.open += count;
       }
+
+      const totalTasks = 
+        taskCounts.done + 
+        taskCounts.cancelled + 
+        taskCounts.blocked + 
+        taskCounts.inProgress + 
+        taskCounts.open;
+      const errorRate = totalTasks > 0 
+        ? ((taskCounts.cancelled + taskCounts.blocked) / totalTasks) * 100 
+        : 0;
 
       const now = new Date();
       const monthStart = getUtcMonthStart(now);
@@ -194,6 +208,7 @@ export function dashboardService(db: Db) {
           error: agentCounts.error,
         },
         tasks: taskCounts,
+        errorRate: Number(errorRate.toFixed(2)),
         costs: {
           monthSpendCents,
           monthBudgetCents: company.budgetMonthlyCents,

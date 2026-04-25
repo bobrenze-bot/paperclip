@@ -289,7 +289,9 @@ const dashboard: DashboardSummary = {
     inProgress: 0,
     blocked: 0,
     done: 0,
+    cancelled: 0,
   },
+  errorRate: 0,
   costs: {
     monthSpendCents: 900,
     monthBudgetCents: 1000,

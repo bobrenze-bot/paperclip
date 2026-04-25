@@ -1248,7 +1248,9 @@ export const storybookDashboardSummary: DashboardSummary = {
     inProgress: 4,
     blocked: 1,
     done: 36,
+    cancelled: 0,
   },
+  errorRate: 2.35,
   costs: {
     monthSpendCents: 67_500,
     monthBudgetCents: 250_000,

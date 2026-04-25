@@ -270,18 +270,33 @@ export function Dashboard() {
                 </span>
               }
             />
-            <MetricCard
-              icon={CircleDot}
-              value={data.tasks.inProgress}
-              label="Tasks In Progress"
-              to="/issues"
-              description={
-                <span>
-                  {data.tasks.open} open{", "}
-                  {data.tasks.blocked} blocked
-                </span>
-              }
-            />
+             <MetricCard
+               icon={CircleDot}
+               value={data.tasks.inProgress}
+               label="Tasks In Progress"
+               to="/issues"
+               description={
+                 <span>
+                   {data.tasks.open} open{", "}
+                   {data.tasks.blocked} blocked{", "}
+                   {data.tasks.cancelled} cancelled
+                 </span>
+               }
+             />
+             <MetricCard
+               icon={PauseCircle}
+               value={`${data.errorRate}%`}
+               label="Error Rate"
+               to="/issues"
+               description={
+                 <span>
+                   {(data.tasks.cancelled + data.tasks.blocked) / 
+                    (data.tasks.done + data.tasks.cancelled + data.tasks.blocked + data.tasks.inProgress + data.tasks.open) * 100 > 5 
+                     ? "Above 5% threshold" 
+                     : "Within normal range"}
+                 </span>
+               }
+             />
             <MetricCard
               icon={DollarSign}
               value={formatCents(data.costs.monthSpendCents)}
