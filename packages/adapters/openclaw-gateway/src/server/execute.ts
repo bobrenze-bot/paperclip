@@ -14,9 +14,33 @@ import {
 import crypto, { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 
-type SessionKeyStrategy = "fixed" | "issue" | "run";
+import { 
+  CircuitBreaker,
+  CircuitState,
+  CircuitBreakerOpenError,
+  GatewayConnectionError,
+  isGatewayConnectionError,
+  resetCircuitBreaker,
+  getCircuitBreaker as getCB 
+} from "../gateway/circuit-breaker.js";
 
-type WakePayload = {
+// Type imports for local use
+import type { CircuitBreakerOptions } from "../gateway/circuit-breaker.js";
+
+// Re-export CircuitBreakerOptions from the imported module
+export type { CircuitBreakerOptions } from "../gateway/circuit-breaker.js";
+
+// Type alias for compatibility with older code
+export type CircuitBreakerState = CircuitState;
+
+// GatewayClientOptions with optional circuit breaker options
+interface GatewayClientOptionsWithCB extends GatewayClientOptions {
+  circuitBreakerOptions?: Partial<CircuitBreakerOptions>;
+}
+
+export type SessionKeyStrategy = "fixed" | "issue" | "run";
+
+export type WakePayload = {
   runId: string;
   agentId: string;
   companyId: string;
@@ -29,21 +53,21 @@ type WakePayload = {
   issueIds: string[];
 };
 
-type GatewayDeviceIdentity = {
+export type GatewayDeviceIdentity = {
   deviceId: string;
   publicKeyRawBase64Url: string;
   privateKeyPem: string;
   source: "configured" | "ephemeral";
 };
 
-type GatewayRequestFrame = {
+export type GatewayRequestFrame = {
   type: "req";
   id: string;
   method: string;
   params?: unknown;
 };
 
-type GatewayResponseFrame = {
+export type GatewayResponseFrame = {
   type: "res";
   id: string;
   ok: boolean;
@@ -54,35 +78,36 @@ type GatewayResponseFrame = {
   };
 };
 
-type GatewayEventFrame = {
+export type GatewayEventFrame = {
   type: "event";
   event: string;
   payload?: unknown;
   seq?: number;
 };
 
-type PendingRequest = {
+export type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
   expectFinal: boolean;
   timer: ReturnType<typeof setTimeout> | null;
 };
 
-type GatewayResponseError = Error & {
+export type GatewayResponseError = Error & {
   gatewayCode?: string;
   gatewayDetails?: Record<string, unknown>;
 };
 
-type GatewayClientOptions = {
+export type GatewayClientOptions = {
   url: string;
   headers: Record<string, string>;
   onEvent: (frame: GatewayEventFrame) => Promise<void> | void;
   onLog: AdapterExecutionContext["onLog"];
 };
 
-type GatewayClientRequestOptions = {
+export type GatewayClientRequestOptions = {
   timeoutMs: number;
   expectFinal?: boolean;
+  circuitBreakerOptions?: Partial<CircuitBreakerOptions>;
 };
 
 const PROTOCOL_VERSION = 3;
@@ -652,13 +677,32 @@ class GatewayWsClient {
   private challengePromise: Promise<string>;
   private resolveChallenge!: (nonce: string) => void;
   private rejectChallenge!: (err: Error) => void;
+  private circuitBreaker: CircuitBreaker;
 
-  constructor(private readonly opts: GatewayClientOptions) {
+  constructor(private readonly opts: GatewayClientOptionsWithCB) {
     this.challengePromise = new Promise<string>((resolve, reject) => {
       this.resolveChallenge = resolve;
       this.rejectChallenge = reject;
     });
     this.challengePromise.catch(() => {});
+    
+    // Initialize circuit breaker with provided options
+    const cbOptions = opts.circuitBreakerOptions;
+    this.circuitBreaker = getCB(cbOptions);
+  }
+
+  /**
+   * Get the current circuit breaker state
+   */
+  getCircuitBreakerState(): CircuitBreakerState {
+    return this.circuitBreaker.getState();
+  }
+
+  /**
+   * Check if the circuit is available for requests
+   */
+  isAvailable(): boolean {
+    return this.circuitBreaker.isAvailable();
   }
 
   async connect(
@@ -731,7 +775,14 @@ class GatewayWsClient {
     opts: GatewayClientRequestOptions,
   ): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      // Gateway not connected - this is a failure
+      this.circuitBreaker.recordFailure();
       throw new Error("gateway not connected");
+    }
+
+    // Check if circuit allows request
+    if (!this.circuitBreaker.isAvailable()) {
+      throw new CircuitBreakerOpenError(this.circuitBreaker.getState(), this.circuitBreaker.getMetrics());
     }
 
     const id = randomUUID();
@@ -1244,11 +1295,23 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       }
     };
 
+    // Extract circuit breaker options from config
+    const cbConfig = parseObject(ctx.config.circuitBreaker);
+    const cbOptions: Partial<CircuitBreakerOptions> = {};
+    if (cbConfig) {
+      if (typeof cbConfig.failureThreshold === 'number') cbOptions.failureThreshold = cbConfig.failureThreshold;
+      if (typeof cbConfig.resetTimeoutMs === 'number') cbOptions.resetTimeoutMs = cbConfig.resetTimeoutMs;
+      if (typeof cbConfig.failureWindowMs === 'number') cbOptions.failureWindowMs = cbConfig.failureWindowMs;
+      if (typeof cbConfig.minimumRequests === 'number') cbOptions.minimumRequests = cbConfig.minimumRequests;
+      if (typeof cbConfig.failureRateThreshold === 'number') cbOptions.failureRateThreshold = cbConfig.failureRateThreshold;
+    }
+
     const client = new GatewayWsClient({
       url: parsedUrl.toString(),
       headers,
       onEvent,
       onLog: ctx.onLog,
+      circuitBreakerOptions: cbOptions,
     });
 
     try {
