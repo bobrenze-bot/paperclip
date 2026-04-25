@@ -24,6 +24,7 @@ import { initTelemetryFromConfigFile, flushTelemetry } from "./telemetry.js";
 import { registerWorktreeCommands } from "./commands/worktree.js";
 import { registerPluginCommands } from "./commands/client/plugin.js";
 import { registerClientAuthCommands } from "./commands/client/auth.js";
+import { registerDiffCommands } from "./commands/diff/index.js";
 import { cliVersion } from "./version.js";
 
 const program = new Command();
